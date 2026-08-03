@@ -145,6 +145,9 @@ class Higgsfield:
     """Zustandsloser Client. Mehrere Aufträge dürfen parallel laufen; der einzige
     gemeinsame Zustand ist das Laufzeitgedächtnis, und das ist abgesichert."""
 
+    #: Name für Logbuch und Selbsttest — die Auswahl in `videoquelle` zeigt ihn an.
+    name = "Platform-API"
+
     def __init__(self, api_key: str | None = None, basis: str | None = None):
         # `None` heißt „nimm die Konfiguration“, `""` heißt ausdrücklich „kein Schlüssel“.
         # Ohne diese Unterscheidung ließe sich kein schlüsselloser Client bauen — und ein

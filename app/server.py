@@ -19,8 +19,8 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from . import (config, errors, higgsfield, jobstore, library, llm, logbook, media,
-               pipeline, topics, updater)
+from . import (config, errors, higgsfield, higgsfield_mcp, jobstore, library, llm,
+               logbook, media, pipeline, topics, updater, videoquelle)
 
 QUELLE = "Server"
 
@@ -130,6 +130,40 @@ def anwendung_bauen() -> Flask:
         ergebnis = higgsfield.client.guthaben_wirklich_pruefen()
         logbook.info(QUELLE, f"Guthabenprüfung: {ergebnis.get('meldung', '')}")
         return gut({"ergebnis": ergebnis})
+
+    # ── Higgsfield-Abo anmelden ──────────────────────────────────────────────
+
+    @app.get("/api/abo")
+    def abo_stand():
+        """Ist das Higgsfield-Abo verbunden, und welcher Videoweg ist gerade aktiv?"""
+        return gut({"abo": higgsfield_mcp.anmeldung_stand(),
+                    "wege": videoquelle.uebersicht(),
+                    "aktiv": videoquelle.name_des_aktiven()})
+
+    @app.post("/api/abo/anmelden")
+    def abo_anmelden():
+        """Startet die einmalige Anmeldung und gibt sofort die Anmelde-URL zurück.
+
+        Der Browser wird auf diesem Rechner geöffnet; zusätzlich zeigt die Oberfläche
+        die Adresse an, falls das nicht klappt (etwa im Desktop-Fenster).
+        """
+        if pipeline.laeuft_gerade():
+            raise errors.EingabeFehler(
+                "Es läuft gerade ein Auftrag.",
+                "Bitte erst abwarten — ein Wechsel des Zugangs mitten im Lauf würde "
+                "die Szenen auseinanderlaufen lassen.", ursprung=QUELLE)
+        daten = request.get_json(silent=True) or {}
+        ergebnis = higgsfield_mcp.anmeldung_starten(
+            browser_oeffnen=daten.get("browser", True) is not False)
+        return gut({"anmeldung": ergebnis})
+
+    @app.get("/api/abo/anmelden")
+    def abo_anmeldung_stand():
+        return gut({"anmeldung": higgsfield_mcp.anmeldung_stand()})
+
+    @app.post("/api/abo/abmelden")
+    def abo_abmelden():
+        return gut(higgsfield_mcp.abmelden())
 
     @app.post("/api/wege-zuruecksetzen")
     def wege_zuruecksetzen():

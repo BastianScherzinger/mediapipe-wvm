@@ -12,6 +12,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import config, errors, higgsfield  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def eigener_guthabenspeicher(tmp_path, monkeypatch):
+    """Jeder Test bekommt einen eigenen Guthabenspeicher.
+
+    Ohne das schreiben Tests, die einen angenommenen Auftrag nachstellen, in den echten
+    `data/guthabenstand.json` — und das Dashboard behauptet danach, es sei Guthaben
+    vorhanden, obwohl nie ein echter Auftrag lief. Genau das ist einmal passiert.
+    """
+    monkeypatch.setattr(higgsfield, "_guthaben",
+                        higgsfield._Guthabenstand(tmp_path / "guthaben.json"))
+
+
 @pytest.fixture
 def klient(monkeypatch):
     """Client mit erfundenem Schlüssel und beschleunigter Taktung."""

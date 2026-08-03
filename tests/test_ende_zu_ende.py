@@ -35,8 +35,12 @@ class AttrappeHiggsfield:
     """Verhält sich wie der echte Client, erzeugt aber lokale Dateien.
 
     Wichtig: sie meldet Fortschritt genau wie das Original, damit auch die
-    Fortschrittsanzeige und die Restzeitschätzung durch den Test laufen.
+    Fortschrittsanzeige und die Restzeitschätzung durch den Test laufen. `name` und
+    `verfuegbar` braucht sie, weil die Auswahl in `videoquelle` danach fragt.
     """
+
+    name = "Attrappe"
+    verfuegbar = True
 
     def __init__(self, ordner: Path, scheitert_bei: int = 0):
         self.ordner = Path(ordner)
@@ -92,6 +96,10 @@ class AttrappeHiggsfield:
     def abbrechen(self, request_id):
         self.abgebrochen += 1
         return True
+
+    def selbsttest(self):
+        return {"zustand": "bereit", "ok": True, "guthaben": "vorhanden",
+                "meldung": "Attrappe bereit.", "hinweis": ""}
 
 
 DREHBUCH = {

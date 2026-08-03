@@ -29,6 +29,7 @@
     <g id="i-kopieren"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></g>
     <g id="i-neu"><path d="M4 12a8 8 0 1 1 2.5 5.8"/><path d="M4 18v-5h5"/></g>
     <g id="i-schliessen"><path d="m7 7 10 10M17 7 7 17"/></g>
+    <g id="i-schluessel"><circle cx="8" cy="12" r="4"/><path d="M12 12h8M17.5 12v3M20 12v2.5"/></g>
   </defs>
 </svg>
 
@@ -40,7 +41,11 @@
   </div>
   <div class="kopf-status">
     <button class="lampe" id="lampe-higgsfield" type="button">
-      <span class="lampe-punkt"></span>Higgsfield
+      <span class="lampe-punkt"></span><span id="lampe-higgsfield-text">Higgsfield</span>
+    </button>
+    <button class="knopf knopf-leise knopf-abo" id="btn-abo" type="button" hidden>
+      <svg class="icon" viewBox="0 0 24 24"><use href="#i-schluessel"/></svg>
+      <span id="abo-text">Abo anmelden</span>
     </button>
     <button class="lampe" id="lampe-claude" type="button">
       <span class="lampe-punkt"></span>Sprachmodell
@@ -260,6 +265,7 @@
 <script src="/static/js/logbuch.js"></script>
 <script src="/static/js/bibliothek.js"></script>
 <script src="/static/js/aktualisierung.js"></script>
+<script src="/static/js/abo.js"></script>
 <script src="/static/js/start.js"></script>
 </body>
 </html>

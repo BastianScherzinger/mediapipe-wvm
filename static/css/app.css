@@ -285,6 +285,51 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 @keyframes drehen { to { transform: rotate(360deg); } }
 
+/* Abo-Anmeldung: taucht nur auf, wenn sie gebraucht wird. Cyan, weil sie zum
+   Videoweg gehört — nicht grün oder gelb, das ist dem Aktualisieren vorbehalten. */
+.knopf-abo[data-zustand="offen"] {
+  color: var(--akzent-2);
+  border-color: rgba(34, 211, 238, .4);
+  background: var(--akzent-schwach);
+}
+.knopf-abo[data-zustand="offen"]:hover:not(:disabled) {
+  background: rgba(34, 211, 238, .2);
+  border-color: rgba(34, 211, 238, .6);
+}
+.knopf-abo[data-zustand="verbunden"] {
+  color: #7BE3BC;
+  border-color: rgba(52, 211, 153, .3);
+  background: rgba(52, 211, 153, .08);
+}
+.knopf-abo[data-zustand="wartet"] { color: var(--warnung); }
+.knopf-abo[data-zustand="wartet"] .icon { animation: drehen 1.4s linear infinite; }
+
+/* Fenster der Abo-Anmeldung */
+.abo-fenster { width: min(620px, 92vw); }
+.abo-inhalt { padding: var(--a5); display: flex; flex-direction: column; gap: var(--a3); }
+.abo-inhalt p { margin: 0; line-height: 1.6; }
+.abo-adresse {
+  padding: var(--a3);
+  background: rgba(0,0,0,.32);
+  border: 1px solid var(--rand);
+  border-radius: var(--rund-mini);
+  max-height: 96px;
+  overflow: auto;
+}
+.abo-adresse code {
+  font-family: var(--schrift-fest);
+  font-size: 11.5px;
+  color: var(--text-2);
+  word-break: break-all;
+}
+.abo-knoepfe { display: flex; gap: var(--a2); flex-wrap: wrap; }
+.abo-knoepfe .knopf { text-decoration: none; }
+.abo-warten {
+  color: var(--akzent);
+  font-size: 13px;
+  animation: atmen 2.4s ease-in-out infinite;
+}
+
 .knopf-mini {
   padding: 6px;
   color: var(--text-3);

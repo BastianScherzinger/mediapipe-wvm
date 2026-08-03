@@ -74,12 +74,31 @@ Eine Stufe, die an Zugang oder Guthaben scheitert, wird fünf Minuten gesperrt
 (`llm._SPERRDAUER`), damit nicht jede Anfrage in dieselbe Wand läuft. Ein Netzhänger
 sperrt nicht — der kann beim nächsten Mal weg sein.
 
-**Video** (`MPW_VIDEO_CHAIN`)
+**Video** (`MPW_VIDEO_CHAIN`, Auswahl in `videoquelle.aktiv()`)
 
-| Stufe | Stand |
-|---|---|
-| `platform` | Schlüssel gültig, **kein API-Guthaben** (403 `not_enough_credits`) |
-| `demo` | `media.platzhalter_clip()` — ganze Kette ohne Guthaben prüfbar |
+| Stufe | Was sie ist | Stand 03.08.2026 |
+|---|---|---|
+| `platform` | Platform-API mit dem Schlüssel aus der `.env` | Schlüssel gültig, **kein Guthaben** (403 bei allen Modellen) |
+| `abo` | MCP-Dienst mit den Credits des Web-Abos | eingebaut, braucht **einmalige Anmeldung** im Dashboard |
+| `demo` | Platzhalterclips aus ffmpeg, ohne Netz | jederzeit einsatzbereit |
+
+> **Der Abo-Weg steht bewusst nicht in der Vorgabekette.** Sobald er angemeldet ist,
+> schiebt `videoquelle._reihenfolge()` ihn selbsttätig nach vorn — er ist dann der
+> einzige mit Guthaben. Niemand muss dafür die `.env` anfassen.
+
+**So läuft die Anmeldung** (`higgsfield_mcp.py`): Das Programm meldet sich selbst als
+Anwendung an (dynamische Registrierung nach RFC 7591 — geprüft, HTTP 201), erzeugt eine
+Anmelde-URL mit PKCE/S256 und nimmt die Antwort auf einem lokalen Port zwischen 8765 und
+8779 entgegen. Danach liegt ein Erneuerungstoken in `data/higgsfield_abo.json`, und alle
+weiteren Starts brauchen keinen Browser mehr. Der Dienst spricht MCP über HTTP und
+antwortet wahlweise als JSON oder als Ereignisstrom; `_zerlegen()` versteht beides.
+
+Die Modellnamen unterscheiden sich von der Platform-API: dort `higgsfield-ai/soul/standard`,
+hier schlicht `soul_2` und `kling3_0_turbo`.
+
+**Für die Übergabe:** `data/higgsfield_abo.json` ist von `.gitignore` erfasst. Wer die
+Anmeldung auf den Kundenrechner mitgeben will, kopiert die Datei mit der `.env` zusammen;
+sonst klickt der Kunde einmal selbst.
 
 ---
 

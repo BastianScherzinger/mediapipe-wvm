@@ -34,6 +34,7 @@
     MPW.formular.aufbauen(start);
     MPW.bibliothek.aufbauen();
     MPW.aktualisierung.aufbauen();
+    MPW.abo.aufbauen();
 
     lampenSetzen(start.diagnose);
     $("#btn-selbsttest").addEventListener("click", selbsttest);

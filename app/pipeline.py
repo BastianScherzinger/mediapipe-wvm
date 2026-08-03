@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import (config, errors, higgsfield, jobstore, library, logbook, media,
-               promptsmith)
+               promptsmith, videoquelle)
 
 QUELLE = "Ablauf"
 
@@ -304,6 +304,10 @@ def _schritt_bild_und_video(auftrag_id: str, e: Einstellungen,
     einer Warteschlange, und der Fortschritt bleibt so nachvollziehbar — man sieht,
     bei welcher Szene man steht.
     """
+    # Einmal je Auftrag festlegen, wer die Bilder und Videos macht — mitten im Lauf
+    # zu wechseln würde zu Szenen führen, die nicht zueinander passen.
+    dienst = videoquelle.aktiv()
+
     braucht_bild = higgsfield.braucht_startbild(e.videomodell)
     anzahl = len(drehbuch.szenen)
     clips: list[Path] = []
@@ -330,7 +334,7 @@ def _schritt_bild_und_video(auftrag_id: str, e: Einstellungen,
                 _fortschritt(auftrag_id, "bild", gesamt, rest,
                              f"Szene {_s}/{anzahl}")
 
-            ergebnis = higgsfield.client.bild(
+            ergebnis = dienst.bild(
                 szene.bild_prompt, seitenverhaeltnis=e.seitenverhaeltnis,
                 modell=e.bildmodell or config.IMAGE_MODEL,
                 abbruch=abbruch, melden=bildmeldung)
@@ -339,7 +343,7 @@ def _schritt_bild_und_video(auftrag_id: str, e: Einstellungen,
             # Herunterladen, damit der Kunde das Startbild behält und die Oberfläche
             # es anzeigen kann — die Adresse beim Anbieter läuft nach kurzer Zeit ab.
             bildpfad = ordner / f"szene_{stelle:02d}_start.jpg"
-            higgsfield.client.herunterladen(ergebnis.url, bildpfad, abbruch)
+            dienst.herunterladen(ergebnis.url, bildpfad, abbruch)
             logbook.erfolg("Startbild", f"Szene {stelle}/{anzahl} steht "
                                         f"({ergebnis.dauer:.0f} s).", job=auftrag_id)
             logbook.ereignis("startbild", {"szene": stelle,
@@ -365,18 +369,18 @@ def _schritt_bild_und_video(auftrag_id: str, e: Einstellungen,
                          f"Szene {_s}/{anzahl} · {zustand}")
 
         if braucht_bild:
-            ergebnis = higgsfield.client.video_aus_bild(
+            ergebnis = dienst.video_aus_bild(
                 szene.video_prompt, bilder[stelle], dauer=szene.dauer,
                 modell=e.videomodell,
                 bewegungen=[e.bewegung] if e.bewegung else None,
                 abbruch=abbruch, melden=videomeldung)
         else:
-            ergebnis = higgsfield.client.video_aus_text(
+            ergebnis = dienst.video_aus_text(
                 szene.video_prompt, dauer=szene.dauer, modell=e.videomodell,
                 abbruch=abbruch, melden=videomeldung)
 
         clippfad = ordner / f"szene_{stelle:02d}.mp4"
-        higgsfield.client.herunterladen(ergebnis.url, clippfad, abbruch)
+        dienst.herunterladen(ergebnis.url, clippfad, abbruch)
         media.pruefe_video(clippfad)
         clips.append(clippfad)
         logbook.erfolg("Higgsfield", f"Szene {stelle}/{anzahl} fertig "

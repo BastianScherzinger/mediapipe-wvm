@@ -40,6 +40,28 @@ Sekunden.
 
 ---
 
+## Die zwei Guthaben von Higgsfield
+
+Higgsfield führt zwei getrennte Konten, und das ist die häufigste Stolperfalle:
+
+| Guthaben | Wofür | Wie das Programm es nutzt |
+|---|---|---|
+| **Web-Abo** (Soul/Plus auf higgsfield.ai) | das, was man beim Abschluss eines Abos bezahlt | über den Knopf **„Abo anmelden"** |
+| **Platform-API-Credits** (cloud.higgsfield.ai) | eigenes Konto, extra aufzuladen | über den `HIGGSFIELD_API_KEY` in der `.env` |
+
+**Ein Jahresabo füllt den API-Topf nicht.** Ist er leer, meldet das Programm das im
+Klartext und zeigt oben den Knopf „Abo anmelden".
+
+Ein Klick darauf öffnet einmalig die Higgsfield-Anmeldeseite im Browser. Nach der
+Bestätigung laufen alle Videos über die Credits des Abos — und zwar dauerhaft: Das
+Programm merkt sich die Anmeldung und erneuert sie selbstständig. Ein zweites Mal
+klicken muss niemand.
+
+Steht der Knopf auf „Abo verbunden", ist alles in Ordnung. Ein Klick darauf würde
+abmelden.
+
+---
+
 ## Aktualisieren
 
 Oben rechts sitzt ein Knopf, der den Stand des Programms zeigt:
@@ -143,7 +165,7 @@ fehlt. Die drei Lämpchen daneben zeigen den Zustand auf einen Blick.
 
 | Meldung | Bedeutung und Abhilfe |
 |---|---|
-| „Higgsfield hat kein Guthaben mehr.“ | Der API-Topf ist leer. **Wichtig:** Ein Web-Abo (Soul/Plus) füllt ihn *nicht* — das sind getrennte Guthaben. Unter cloud.higgsfield.ai API-Credits aufladen. |
+| „Higgsfield hat kein Guthaben mehr.” | Der API-Topf ist leer. **Wichtig:** Ein Web-Abo (Soul/Plus) füllt ihn *nicht* — das sind getrennte Guthaben. Entweder unter cloud.higgsfield.ai API-Credits aufladen **oder** oben auf „Abo anmelden” klicken (siehe unten). |
 | „Das Claude-Abo hat sein Kontingent erreicht.“ | Bis zur Rückstellung übernimmt automatisch die lokale KI. Sie ist etwas schwächer, kostet aber nichts. |
 | „Kein Sprachmodell verfügbar.“ | Entweder einmal `claude login` im Terminal ausführen, oder Ollama starten (`ollama serve`). |
 | „Kein brauchbares ffmpeg gefunden.“ | `python -m pip install imageio-ffmpeg`, dann neu starten. |
