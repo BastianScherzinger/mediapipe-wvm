@@ -119,18 +119,53 @@ def _reihenfolge() -> list[str]:
 
 _letzter: str = ""
 
+#: Wie lange ein beobachteter Guthabenstand die Auswahl beeinflusst (Sekunden).
+#: Danach wird der Weg wieder probiert — sonst bliebe ein aufgeladenes Konto
+#: für immer übersprungen.
+GEDAECHTNIS = 6 * 3600
+
+
+def _kann_liefern(name: str, weg) -> bool:
+    """Kann dieser Weg gerade wirklich ein Video machen?
+
+    `verfuegbar` heißt nur „eingerichtet“. Ein gültiger Schlüssel auf einem leeren
+    Guthabentopf ist eingerichtet und trotzdem nutzlos — ohne diese Unterscheidung
+    stünde der zweite Eintrag in `MPW_VIDEO_CHAIN` bloß zur Zierde da, denn der erste
+    würde jeden Auftrag an sich ziehen und dann mit 403 abbrechen.
+    """
+    if not getattr(weg, "verfuegbar", False):
+        return False
+
+    # Gefragt wird der Weg selbst, nicht das Modul: Tests setzen eigene Dienste ein,
+    # und ein Dienst ohne Guthabengedächtnis gilt schlicht als einsatzbereit.
+    merker = getattr(weg, "guthaben_bekannt", None)
+    if callable(merker):
+        stand = merker() or {}
+        frisch = (time.time() - float(stand.get("zeitpunkt", 0))) < GEDAECHTNIS
+        if stand and frisch and not stand.get("guthaben"):
+            return False
+    return True
+
 
 def aktiv():
     """Der Dienst, der den nächsten Auftrag ausführt."""
     global _letzter
-    for name in _reihenfolge():
-        weg = _wege().get(name)
-        if weg is None or not getattr(weg, "verfuegbar", False):
-            continue
-        if name != _letzter:
-            logbook.info(QUELLE, f"Videoerzeugung läuft über: {getattr(weg, 'name', name)}")
-            _letzter = name
-        return weg
+    reihenfolge = _reihenfolge()
+
+    for pruefung in (_kann_liefern, lambda n, w: bool(getattr(w, "verfuegbar", False))):
+        # Zweiter Durchgang ohne Guthabenprüfung: Kann keiner sicher liefern, ist die
+        # Fehlermeldung des Dienstes selbst immer noch besser als gar kein Versuch.
+        for name in reihenfolge:
+            weg = _wege().get(name)
+            if weg is None or not pruefung(name, weg):
+                continue
+            if name != _letzter:
+                # Der Probelauf ist eine Warnung wert: Er liefert Platzhalter, und wer
+                # das im Logbuch überliest, hält sie am Ende für das Ergebnis.
+                melden = logbook.warnung if name == "demo" else logbook.info
+                melden(QUELLE, f"Videoerzeugung läuft über: {getattr(weg, 'name', name)}")
+                _letzter = name
+            return weg
 
     raise errors.KonfigurationsFehler(
         "Es steht kein Weg zur Videoerzeugung bereit.",
@@ -143,6 +178,50 @@ def name_des_aktiven() -> str:
         return getattr(aktiv(), "name", "unbekannt")
     except errors.StudioFehler:
         return "keiner"
+
+
+def befund() -> dict:
+    """Kurzurteil für die Ampel im Kopf — **ohne** Netzaufruf.
+
+    Die Ampel soll nicht bei jedem Fensteröffnen den Dienst befragen, aber sie darf
+    auch nicht grün leuchten, während der Guthabentopf nachweislich leer ist. Beides
+    zusammen geht nur mit dem, was ohne Netz bekannt ist: die Anmeldung des Abos und
+    der Ausgang des letzten echten Auftrags.
+    """
+    demo_moeglich = "demo" in config.VIDEO_CHAIN and media.ffmpeg_vorhanden()
+    ausweichen = (" Solange erzeugt der Probelauf Platzhalterclips."
+                  if demo_moeglich else "")
+
+    if higgsfield_mcp.angemeldet():
+        return {"ok": True, "zustand": "ok",
+                "meldung": "Abo verbunden — Videos laufen über die Credits des Abos.",
+                "hinweis": ""}
+
+    if not higgsfield.client.verfuegbar:
+        if demo_moeglich:
+            return {"ok": True, "zustand": "warnung",
+                    "meldung": "Kein Zugang zu Higgsfield — nur Probelauf möglich.",
+                    "hinweis": "Oben auf „Abo verbinden“ klicken oder einen "
+                               "HIGGSFIELD_API_KEY in die .env eintragen."}
+        return {"ok": False, "zustand": "fehler",
+                "meldung": "Kein Weg zur Videoerzeugung.",
+                "hinweis": "Oben auf „Abo verbinden“ klicken oder einen "
+                           "HIGGSFIELD_API_KEY in die .env eintragen."}
+
+    stand = higgsfield.client.guthaben_bekannt()
+    if not stand:
+        return {"ok": True, "zustand": "ok",
+                "meldung": "Higgsfield-Zugang hinterlegt. Das Guthaben zeigt sich beim "
+                           "ersten Auftrag.",
+                "hinweis": ""}
+    if stand.get("guthaben"):
+        return {"ok": True, "zustand": "ok",
+                "meldung": "Higgsfield bereit — Guthaben zuletzt bestätigt.", "hinweis": ""}
+    return {"ok": True, "zustand": "warnung",
+            "meldung": "Higgsfield-Zugang gültig, aber der API-Topf ist leer.",
+            "hinweis": "Oben auf „Abo verbinden“ klicken — das nutzt die Credits des "
+                       "Web-Abos. Oder unter cloud.higgsfield.ai API-Credits aufladen."
+                       + ausweichen}
 
 
 def uebersicht() -> list[dict]:

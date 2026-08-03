@@ -67,13 +67,13 @@
       knopf.dataset.zustand = "verbunden";
       knopf.title = (abo.meldung || "") +
         "  ·  Aktiver Weg für Videos: " + (stand.aktiv || "?") +
-        "  ·  Klicken zum Abmelden.";
+        "  ·  Klicken zum Trennen.";
     } else {
-      text.textContent = "Abo anmelden";
+      text.textContent = "Abo verbinden";
       knopf.dataset.zustand = "offen";
-      knopf.title = "Higgsfield-Abo verbinden — einmalig im Browser bestätigen. " +
-        "Danach laufen die Videos über die Credits des Abos statt über den " +
-        "(leeren) API-Topf.";
+      knopf.title = "Ihr bestehendes Higgsfield-Abo mit dem Programm verbinden — " +
+        "einmalig im Browser bestätigen, kostet nichts extra. Danach laufen die Videos " +
+        "über die Credits des Abos statt über den (leeren) API-Topf.";
     }
   }
 
@@ -81,12 +81,13 @@
     if (!stand) return;
 
     if (stand.abo?.angemeldet) {
-      if (!window.confirm("Higgsfield-Abo abmelden?\n\nDanach laufen Videos wieder über " +
-                          "den API-Schlüssel.")) return;
+      if (!window.confirm("Verbindung zum Higgsfield-Abo trennen?\n\nDanach laufen Videos " +
+                          "wieder über den API-Schlüssel.")) return;
       try {
         await MPW.hole("/api/abo/abmelden", { method: "POST" });
-        MPW.melden("Abo abgemeldet.", "erfolg");
+        MPW.melden("Abo getrennt.", "erfolg");
         await laden();
+        MPW.start?.pruefen?.();
       } catch (fehler) {
         MPW.melden(fehler.message, "fehler");
       }
@@ -123,6 +124,7 @@
         wartetAufBestaetigung = false;
         fensterSchliessen();
         await laden();
+        MPW.start?.pruefen?.();        // Lampen sofort auf den neuen Zugang stellen
         MPW.melden("Higgsfield-Abo verbunden — Videos laufen jetzt über die Abo-Credits.",
                    "erfolg", 9000);
         return;

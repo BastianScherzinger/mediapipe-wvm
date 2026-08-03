@@ -12,7 +12,9 @@
 
   let laufenderAuftrag = "";
 
-  MPW.start = { auftragStarten, auftragAbbrechen };
+  // `pruefen` heißt nach außen so, wie der Knopf beschriftet ist. Die Abo-Anmeldung
+  // ruft es auf, damit die Lampen sofort den neuen Zugang zeigen.
+  MPW.start = { auftragStarten, auftragAbbrechen, pruefen: selbsttest };
 
   document.addEventListener("DOMContentLoaded", hochfahren);
 
@@ -49,7 +51,7 @@
     if (!start.diagnose.startbereit) {
       const offen = start.diagnose.befunde.filter((b) => b.zustand === "fehler");
       zeile(offen.map((b) => b.meldung).join(" "), "fehler");
-      MPW.melden("Es fehlt etwas — siehe Selbsttest oben rechts.", "fehler", 10000);
+      MPW.melden("Es fehlt etwas — oben rechts auf „Prüfen“ klicken.", "fehler", 10000);
     }
   }
 
@@ -162,20 +164,30 @@
       const e = antwort.ergebnis;
 
       lampenSetzen(e.system);
-      lampeSetzen("higgsfield", e.higgsfield.ok ? "gut" :
-                  (e.higgsfield.guthaben === "leer" ? "warnung" : "schlecht"),
-                  e.higgsfield.meldung + " " + (e.higgsfield.hinweis || ""));
+
+      // Die Higgsfield-Lampe steht für „es können Videos entstehen“, nicht für einen
+      // bestimmten Zugang. Grün also auch dann, wenn nicht die Platform-API, sondern
+      // das verbundene Abo die Arbeit macht.
+      const wege = e.videowege || [];
+      const echt = wege.find((w) => (w.weg === "platform" || w.weg === "abo") && w.ok);
+      const probe = wege.find((w) => w.weg === "demo" && w.ok);
+      lampeSetzen("higgsfield",
+                  echt ? "gut" : (probe ? "warnung" : "schlecht"),
+                  echt ? echt.name + ": " + echt.meldung
+                       : (e.higgsfield.meldung + " " + (e.higgsfield.hinweis || "")));
+
       lampeSetzen("ffmpeg", e.ffmpeg.ok ? "gut" : "schlecht", e.ffmpeg.meldung);
 
       const bereit = (e.sprachmodelle || []).filter((w) => w.bereit);
       lampeSetzen("claude", bereit.length ? "gut" : "schlecht",
-                  bereit.length ? "Verfügbar: " + bereit.map((w) => w.name).join(", ")
+                  bereit.length ? "Schreibt das Drehbuch. Verfügbar: " +
+                                  bereit.map((w) => w.name).join(", ")
                                 : "Kein Sprachmodell verfügbar.");
 
       const probleme = [
-        !e.higgsfield.ok ? "Higgsfield: " + e.higgsfield.meldung : null,
-        !e.ffmpeg.ok ? "ffmpeg: " + e.ffmpeg.meldung : null,
-        !bereit.length ? "Kein Sprachmodell erreichbar." : null,
+        !echt ? "Higgsfield: " + e.higgsfield.meldung : null,
+        !e.ffmpeg.ok ? "Videoschnitt: " + e.ffmpeg.meldung : null,
+        !bereit.length ? "Kein Sprachmodell für das Drehbuch erreichbar." : null,
       ].filter(Boolean);
 
       if (probleme.length) MPW.melden(probleme.join(" · "), "fehler", 12000);
@@ -201,7 +213,7 @@
     const lampe = $("#lampe-" + name);
     if (!lampe) return;
     lampe.dataset.zustand = zustand;
-    lampe.title = (titel || "").trim() + "  (klicken für den Selbsttest)";
+    lampe.title = (titel || "").trim() + "  (klicken, um alles zu prüfen)";
   }
 
   function zeile(text, art) {

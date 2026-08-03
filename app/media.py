@@ -540,10 +540,16 @@ def selbsttest() -> dict:
     try:
         lauf = subprocess.run([programm, "-version"], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=30)
+        # Die Bannerzeile („ffmpeg version 7.1-essentials_build-www.gyan.dev …“) steht
+        # als Hinweis in der Oberfläche. Ungekürzt liest sie sich wie ein Fehler —
+        # deshalb nur die Versionsnummer.
         erste = (lauf.stdout or "").splitlines()[0] if lauf.stdout else ""
+        treffer = re.search(r"ffmpeg version (\S+)", erste)
+        version = treffer.group(1).split("-")[0] if treffer else ""
         return {"ok": lauf.returncode == 0,
-                "meldung": erste or "ffmpeg antwortet.",
-                "pfad": programm, "hinweis": ""}
+                "meldung": (f"Einsatzbereit (ffmpeg {version})." if version
+                            else "Einsatzbereit."),
+                "pfad": programm, "version": erste, "hinweis": ""}
     except Exception as fehler:
         return {"ok": False, "meldung": f"ffmpeg antwortet nicht: {type(fehler).__name__}",
                 "hinweis": "Installation prüfen."}

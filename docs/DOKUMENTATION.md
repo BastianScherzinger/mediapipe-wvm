@@ -18,6 +18,8 @@ app/
 ├── errors.py         Fehlerklassen mit Meldung UND Handlungshinweis
 ├── logbook.py        Logbuch + Ereignisverteilung (ein Kanal für beides)
 ├── higgsfield.py     Platform-API: Bild, Video, Polling, Restzeit, Abbruch
+├── higgsfield_mcp.py Abo-Weg über MCP: OAuth-Anmeldung, Bild, Video
+├── videoquelle.py    Wählt zwischen Platform, Abo und Probelauf
 ├── promptsmith.py    Briefing → Drehbuch (der eigentliche Mehrwert)
 ├── llm/              Sprachmodell-Kette: CLI → API → Ollama
 │   ├── claude_cli.py
@@ -32,13 +34,14 @@ app/
 └── server.py         Flask-Routen, Ereignisstrom, Dateiauslieferung
 
 static/js/            kern · formular · ablauf · logbuch · bibliothek ·
-                      aktualisierung · start
+                      aktualisierung · abo · start
 static/css/app.css    Design-Tokens und alle Bausteine
 templates/index.html  Struktur + eingebetteter Iconsatz
 
-data/                 auftraege.db, laufzeiten.json, guthabenstand.json
+data/                 auftraege.db, laufzeiten.json, guthabenstand.json,
+                      higgsfield_abo.json
 output/               ein Ordner je Video
-tests/                156 Tests
+tests/                212 Tests
 ```
 
 **Abhängigkeitsrichtung:** `server → pipeline → {promptsmith, higgsfield, media, library,
@@ -85,6 +88,22 @@ sperrt nicht — der kann beim nächsten Mal weg sein.
 > **Der Abo-Weg steht bewusst nicht in der Vorgabekette.** Sobald er angemeldet ist,
 > schiebt `videoquelle._reihenfolge()` ihn selbsttätig nach vorn — er ist dann der
 > einzige mit Guthaben. Niemand muss dafür die `.env` anfassen.
+
+**„Verfügbar“ genügt nicht.** Ein hinterlegter Schlüssel auf einem leeren Guthabentopf
+ist eingerichtet und trotzdem nutzlos. Würde die Auswahl nur `verfuegbar` prüfen, zöge
+`platform` jeden Auftrag an sich und bräche mit 403 ab — der zweite Eintrag der Kette
+stünde bloß zur Zierde da. `videoquelle._kann_liefern()` fragt deshalb zusätzlich das
+Guthabengedächtnis des Weges (`guthaben_bekannt()`, nur der Platform-Client hat eins).
+
+Zwei Dinge halten das ehrlich:
+
+* Der Befund verfällt nach `videoquelle.GEDAECHTNIS` (6 Stunden). Wer nachlädt, wird
+  sonst für immer übersprungen.
+* Findet der erste Durchgang niemanden, läuft ein zweiter **ohne** Guthabenprüfung. Die
+  Fehlermeldung des Dienstes selbst ist immer noch besser als gar kein Versuch.
+
+Fällt die Wahl auf den Probelauf, ist die Logzeile eine **Warnung**, keine Notiz — wer
+sie überliest, hält die Platzhalter am Ende für das Ergebnis.
 
 **So läuft die Anmeldung** (`higgsfield_mcp.py`): Das Programm meldet sich selbst als
 Anwendung an (dynamische Registrierung nach RFC 7591 — geprüft, HTTP 201), erzeugt eine
@@ -187,6 +206,42 @@ keine, und der Knopf meldet das ehrlich, statt es zu versuchen.
 
 ---
 
+## 4c. Die Kopfzeile
+
+Sie ist das Einzige, was der Kunde liest, bevor er den ersten Auftrag startet — und die
+einzige Stelle, an der er Fachjargon zu sehen bekäme. Deshalb steht dort ausschließlich,
+was eine Funktion *tut*:
+
+| Anzeige | Innerer Name | Woher der Zustand kommt |
+|---|---|---|
+| **Higgsfield** | `Higgsfield` | `videoquelle.befund()` — grün nur, wenn echte Videos entstehen können |
+| **Drehbuch** | `Sprachmodell` | `llm.verfuegbare_wege()` |
+| **Videoschnitt** | `ffmpeg` | `media.selbsttest()` |
+| **Prüfen** | — | `POST /api/selbsttest` |
+| **Update** | — | `GET /api/aktualisierung` |
+| **Abo verbinden** | — | `GET /api/abo` |
+
+Die inneren Namen bleiben unverändert; nur die Beschriftung in `index.html` und die Texte
+im Frontend sind Kundensprache. `tests/test_kopfzeile.py` hält beides fest — sowohl die
+neuen Wörter als auch die Abwesenheit der alten.
+
+Drei Festlegungen dahinter:
+
+**Die Ampel darf nicht umspringen.** Vorher war die Higgsfield-Lampe beim Start grün
+(`config.diagnose()` sieht nur die `.env` und findet dort einen gültigen Schlüssel) und
+wurde nach dem ersten Prüfen gelb. `server.diagnose_mit_videoweg()` ersetzt den Befund
+deshalb durch den der Videoquelle — die weiß vom Abo und vom Guthabengedächtnis und
+kommt ohne Netzaufruf aus.
+
+**Gelb ist kein Startverbot.** Nur ein `fehler` kippt `startbereit`. Ein leerer
+Guthabentopf ist eine Warnung: das Programm läuft, es erzeugt eben Platzhalter.
+
+**Der Knopf heißt immer „Update“.** Ein wechselnder Text („Aktuell“ / „Version“ /
+„Aktualisierung (3)“) lässt ihn wie verschiedene Knöpfe wirken. Zustand sagen Farbe und
+Zahl.
+
+---
+
 ## 5. Was beim Bauen Zeit gekostet hat
 
 Vier Fallen, die alle im Code kommentiert sind — damit sie niemand ein zweites Mal tritt:
@@ -247,7 +302,7 @@ sehen war nichts. Jetzt rollt die Spalte als Ganzes, und die Kacheln behalten ü
 ## 7. Tests
 
 ```
-python -m pytest tests/ -q                    # 156 Tests, rund 100 Sekunden
+python -m pytest tests/ -q                    # 212 Tests, rund 95 Sekunden
 python -m pytest tests/ -q -m "not langsam"   # ohne echte ffmpeg-Läufe, ~5 Sekunden
 ```
 
@@ -258,6 +313,9 @@ python -m pytest tests/ -q -m "not langsam"   # ohne echte ffmpeg-Läufe, ~5 Sek
 | `test_promptsmith.py` | JSON-Bergung, fremde Feldnamen, Notbehelf, Dateinamen |
 | `test_media.py` | Formatvorgaben, Dateiangaben, echte ffmpeg-Läufe |
 | `test_pipeline.py` | Auftragsspeicher, Eingabeprüfung, Pfadsicherheit, Bibliothek |
+| `test_updater.py` | Nur-Vorspulen, Sperre während eines Auftrags, Neustart |
+| `test_videoquelle.py` | Wahl des Videowegs, Guthabengedächtnis, Abo-Anmeldung |
+| `test_kopfzeile.py` | Beschriftungen und Ampelfarben über die echten Routen |
 | `test_ende_zu_ende.py` | **die ganze Kette** mit Higgsfield-Attrappe |
 
 Der Ende-zu-Ende-Test ist der wichtigste: er ersetzt nur Higgsfield und das

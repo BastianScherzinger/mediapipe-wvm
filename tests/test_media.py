@@ -113,6 +113,20 @@ def test_untaugliches_ffmpeg_wird_aussortiert(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "_ffmpeg_gemerkt", None)      # Zwischenspeicher leeren
 
 
+def test_selbsttest_meldet_kurz_statt_bannerzeile(monkeypatch):
+    """Die Meldung landet als Hinweis an der Lampe „Videoschnitt“. Die volle
+    Bannerzeile von ffmpeg liest sich dort wie eine Störung."""
+    monkeypatch.setattr(config, "_ffmpeg_gemerkt", "/erfundener/pfad/ffmpeg")
+    monkeypatch.setattr(
+        media.subprocess, "run",
+        lambda befehl, **_kw: subprocess.CompletedProcess(
+            befehl, 0, "ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c)", ""))
+    ergebnis = media.selbsttest()
+    monkeypatch.setattr(config, "_ffmpeg_gemerkt", None)
+    assert ergebnis["ok"] is True
+    assert ergebnis["meldung"] == "Einsatzbereit (ffmpeg 7.1)."
+
+
 def test_ffmpeg_pfad_wird_gemerkt(monkeypatch):
     monkeypatch.setattr(config, "_ffmpeg_gemerkt", "/erfundener/pfad/ffmpeg")
     assert config.ffmpeg_pfad() == "/erfundener/pfad/ffmpeg"

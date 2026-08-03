@@ -64,14 +64,14 @@
     knopf.dataset.zustand = stand.zustand || "unbekannt";
     knopf.dataset.laeuft = laeuftGerade ? "ja" : "nein";
 
+    // Der Knopf heißt immer „Update“ — die Farbe und die Zahl sagen den Rest. Ein
+    // wechselnder Text („Aktuell“ / „Version“) lässt ihn wie verschiedene Knöpfe wirken.
     if (stand.zustand === "verfuegbar") {
-      text.textContent = `Aktualisierung (${stand.anzahl})`;
-    } else if (stand.zustand === "aktuell") {
-      text.textContent = "Aktuell";
-    } else if (stand.zustand === "nicht_moeglich") {
-      text.textContent = "Version";
+      text.textContent = `Update (${stand.anzahl})`;
+    } else if (stand.zustand === "aktuell" || stand.zustand === "nicht_moeglich") {
+      text.textContent = "Update";
     } else {
-      text.textContent = "Version ?";
+      text.textContent = "Update ?";
     }
 
     const gesperrt = laeuftGerade || (auftragLaeuft && stand.zustand === "verfuegbar");
@@ -112,7 +112,7 @@
     }
 
     const sicher = window.confirm(
-      `${stand.anzahl} Aktualisierung${stand.anzahl === 1 ? "" : "en"} holen?\n\n` +
+      `Update holen? (${stand.anzahl} Änderung${stand.anzahl === 1 ? "" : "en"})\n\n` +
       "Das Programm wird dabei neu gestartet. Fertige Videos und Einstellungen " +
       "bleiben erhalten.");
     if (!sicher) return;

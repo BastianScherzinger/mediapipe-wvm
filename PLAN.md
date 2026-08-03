@@ -137,6 +137,19 @@ Satz, der sagt *was* passiert ist und *was zu tun* ist. Der Server hört ausschl
 Jedes Paket wird einzeln fertiggestellt, geprüft und dokumentiert, bevor das nächste beginnt.
 Der Fortschritt steht in der Aufgabenliste dieser Sitzung.
 
+**Danach hinzugekommen** — aus dem, was sich beim Benutzen zeigte:
+
+| # | Paket | Fertig, wenn | Stand |
+|---|---|---|---|
+| P13 | Echter Medien-Durchlauf | Ein Film aus echtem Higgsfield-Material liegt vor, Laufzeitschätzungen sind daran geeicht | **offen** — wartet auf Guthaben |
+| P14 | Videobereich | Kacheln sichtbar und anklickbar, der ganze Bereich rollt | fertig |
+| P15 | Glas und Ablauf | LED-Rand an den Glasboxen, Blöcke ohne Querlauf | fertig |
+| P16 | Update-Knopf | Neuer Stand und Neustart per Klick, gesperrt während eines Auftrags | fertig |
+| P17 | Veröffentlichung | Repository steht öffentlich, ohne eine einzige Zugangszeile | fertig |
+| P18 | Abschlussdokumentation | README, technische Doku und API-Befund auf dem Stand des Codes | fertig |
+| P19 | Abo-Weg über MCP | Higgsfield-Abo per Knopfdruck verbunden, Videos laufen über dessen Credits | fertig |
+| P20 | Kopfzeile | Jede Beschriftung ohne Erklärung verständlich, Ampel springt nicht um | fertig |
+
 ---
 
 ## 7. Absicherung (nicht verhandelbar)

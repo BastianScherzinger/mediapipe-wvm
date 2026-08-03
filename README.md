@@ -11,21 +11,36 @@ quadratisch für den Feed, Breitbild für YouTube.
 
 ## Installation in drei Schritten
 
+**0. Einmalige Voraussetzungen**
+
+Zwei Programme müssen auf dem Rechner sein. Beide sind kostenlos:
+
+| Programm | Woher | Worauf zu achten ist |
+|---|---|---|
+| **Python 3.10 oder neuer** | [python.org/downloads](https://www.python.org/downloads/) | Im Installationsfenster unten **„Add python.exe to PATH“ ankreuzen**. Ohne dieses Häkchen findet `start.bat` Python nicht. |
+| **Git** | [git-scm.com/download/win](https://git-scm.com/download/win) | Alle Vorgaben können bleiben, einfach durchklicken. |
+
 **1. Herunterladen**
 
+Eingabeaufforderung öffnen (Windows-Taste, `cmd` tippen, Enter) und diese drei Zeilen
+nacheinander eingeben:
+
 ```
+cd %USERPROFILE%\Desktop
 git clone https://github.com/BastianScherzinger/mediapipe-wvm.git
 cd mediapipe-wvm
 ```
 
+Danach liegt der Ordner **mediapipe-wvm** auf dem Desktop.
+
 > Bitte wirklich `git clone` verwenden und nicht das ZIP herunterladen — nur so
-> funktioniert später der Aktualisierungsknopf im Programm.
+> funktioniert später der Update-Knopf im Programm.
 
 **2. Zugangsdaten einlegen**
 
 Die Datei `.env` wird Ihnen getrennt zugeschickt. Legen Sie sie unverändert in den
-Ordner `mediapipe-wvm`. Sie enthält die Schlüssel für Higgsfield und Claude und gehört
-aus gutem Grund nicht ins Repository.
+Ordner `mediapipe-wvm`, direkt neben `start.bat`. Sie enthält die Schlüssel für
+Higgsfield und Claude und gehört aus gutem Grund nicht ins Repository.
 
 **3. Starten**
 
@@ -33,10 +48,10 @@ Doppelklick auf **`start.bat`**.
 
 Beim allerersten Start werden die benötigten Pakete installiert — das dauert ein paar
 Minuten und passiert nur einmal. Danach öffnet sich das Programmfenster in wenigen
-Sekunden.
+Sekunden. Ab dann genügt jedes Mal der Doppelklick auf `start.bat`.
 
-> Voraussetzung: Python 3.10 oder neuer, mit angekreuztem „Add Python to PATH“.
-> Alles Weitere bringt das Programm selbst mit, auch ffmpeg.
+> Alles Weitere bringt das Programm selbst mit, auch ffmpeg. Fehlt etwas, sagt das
+> Fenster im Klartext, was — es bricht nicht wortlos ab.
 
 ---
 
@@ -46,31 +61,34 @@ Higgsfield führt zwei getrennte Konten, und das ist die häufigste Stolperfalle
 
 | Guthaben | Wofür | Wie das Programm es nutzt |
 |---|---|---|
-| **Web-Abo** (Soul/Plus auf higgsfield.ai) | das, was man beim Abschluss eines Abos bezahlt | über den Knopf **„Abo anmelden"** |
+| **Web-Abo** (Soul/Plus auf higgsfield.ai) | das, was man beim Abschluss eines Abos bezahlt | über den Knopf **„Abo verbinden“** |
 | **Platform-API-Credits** (cloud.higgsfield.ai) | eigenes Konto, extra aufzuladen | über den `HIGGSFIELD_API_KEY` in der `.env` |
 
 **Ein Jahresabo füllt den API-Topf nicht.** Ist er leer, meldet das Programm das im
-Klartext und zeigt oben den Knopf „Abo anmelden".
+Klartext, die Lampe „Higgsfield“ steht auf Gelb, und oben erscheint der Knopf
+„Abo verbinden“.
 
-Ein Klick darauf öffnet einmalig die Higgsfield-Anmeldeseite im Browser. Nach der
-Bestätigung laufen alle Videos über die Credits des Abos — und zwar dauerhaft: Das
-Programm merkt sich die Anmeldung und erneuert sie selbstständig. Ein zweites Mal
-klicken muss niemand.
+Ein Klick darauf öffnet einmalig die Higgsfield-Anmeldeseite im Browser. Es entstehen
+dabei keine zusätzlichen Kosten — das bestehende Abo wird lediglich mit dem Programm
+verbunden. Nach der Bestätigung laufen alle Videos über die Credits des Abos, und zwar
+dauerhaft: Das Programm merkt sich die Anmeldung und erneuert sie selbstständig. Ein
+zweites Mal klicken muss niemand.
 
-Steht der Knopf auf „Abo verbunden", ist alles in Ordnung. Ein Klick darauf würde
-abmelden.
+Steht der Knopf auf „Abo verbunden“, ist alles in Ordnung. Ein Klick darauf würde die
+Verbindung wieder trennen.
 
 ---
 
 ## Aktualisieren
 
-Oben rechts sitzt ein Knopf, der den Stand des Programms zeigt:
+Oben rechts sitzt der Knopf **Update**. Er heißt immer gleich; was zu tun ist, sagt
+seine Farbe:
 
-| Farbe | Bedeutung |
+| Knopf | Bedeutung |
 |---|---|
-| **grün** „Aktuell“ | Es liegt nichts Neues vor. Ein Klick sieht trotzdem nach. |
-| **gelb** „Aktualisierung (3)“ | Drei Änderungen liegen bereit. Ein Klick holt sie. |
-| grau „Version ?“ | Der Stand ließ sich nicht abfragen — meist fehlt die Internetverbindung. |
+| **grün** „Update“ | Es liegt nichts Neues vor. Ein Klick sieht trotzdem nach. |
+| **gelb** „Update (3)“ | Drei Änderungen liegen bereit. Ein Klick holt sie. |
+| grau „Update ?“ | Der Stand ließ sich nicht abfragen — meist fehlt die Internetverbindung. |
 
 Ein Klick auf den gelben Knopf holt den neuen Stand, zieht geänderte Pakete nach und
 startet das Programm neu. Der Vorgang dauert etwa eine halbe Minute; die Ansicht
@@ -160,12 +178,20 @@ output/2026-08-03_werbung_baeckerei_a1b2c3/
 
 ## Wenn etwas nicht klappt
 
-Oben rechts sitzt der **Selbsttest**. Er prüft alle Zugänge und sagt in einem Satz, was
-fehlt. Die drei Lämpchen daneben zeigen den Zustand auf einen Blick.
+Oben rechts sitzt der Knopf **Prüfen**. Er sieht alle Zugänge durch und sagt in einem
+Satz, was fehlt. Die drei Lämpchen daneben zeigen dasselbe auf einen Blick:
+
+| Lampe | Steht für |
+|---|---|
+| **Higgsfield** | Können echte Videos entstehen? Grün heißt: Guthaben ist da (über das Abo oder den API-Topf). Gelb: es geht nur der Probelauf mit Platzhaltern. |
+| **Drehbuch** | Ist eine KI erreichbar, die aus dem Briefing das Drehbuch schreibt? |
+| **Videoschnitt** | Ist ffmpeg einsatzbereit? Es montiert die Szenen und erzeugt die Formate. |
+
+Ein Klick auf ein Lämpchen prüft ebenfalls alles durch.
 
 | Meldung | Bedeutung und Abhilfe |
 |---|---|
-| „Higgsfield hat kein Guthaben mehr.” | Der API-Topf ist leer. **Wichtig:** Ein Web-Abo (Soul/Plus) füllt ihn *nicht* — das sind getrennte Guthaben. Entweder unter cloud.higgsfield.ai API-Credits aufladen **oder** oben auf „Abo anmelden” klicken (siehe unten). |
+| „Higgsfield hat kein Guthaben mehr.” | Der API-Topf ist leer. **Wichtig:** Ein Web-Abo (Soul/Plus) füllt ihn *nicht* — das sind getrennte Guthaben. Entweder unter cloud.higgsfield.ai API-Credits aufladen **oder** oben auf „Abo verbinden” klicken (siehe oben). |
 | „Das Claude-Abo hat sein Kontingent erreicht.“ | Bis zur Rückstellung übernimmt automatisch die lokale KI. Sie ist etwas schwächer, kostet aber nichts. |
 | „Kein Sprachmodell verfügbar.“ | Entweder einmal `claude login` im Terminal ausführen, oder Ollama starten (`ollama serve`). |
 | „Kein brauchbares ffmpeg gefunden.“ | `python -m pip install imageio-ffmpeg`, dann neu starten. |
@@ -184,6 +210,10 @@ Fenster an. Nichts bricht wortlos ab.
 - **Abbrechen wirkt sofort.** Wartende Aufträge werden bei Higgsfield storniert, damit
   kein Guthaben für ein Ergebnis draufgeht, das niemand mehr braucht.
 - **Formate kosten nichts.** Sie entstehen aus dem fertigen Film auf Ihrem Rechner.
+- **Ohne Guthaben läuft der Probelauf.** Statt abzubrechen erzeugt das Programm dann
+  Platzhalterclips, damit sich der ganze Ablauf trotzdem zeigen lässt. Es sagt das
+  deutlich: die Lampe „Higgsfield“ steht auf Gelb und im Logbuch erscheint
+  „Videoerzeugung läuft über: Probelauf (ohne Guthaben)“.
 - **Nichts verlässt Ihren Rechner** außer den Prompts an Claude und Higgsfield. Das
   Programm ist nur lokal erreichbar, nicht im Netzwerk.
 - **Ihre Eingaben bleiben erhalten**, auch wenn Sie das Fenster schließen.

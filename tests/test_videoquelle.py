@@ -15,13 +15,21 @@ from app import config, errors, higgsfield, higgsfield_mcp, videoquelle  # noqa:
 class Weg:
     """Ein Weg, der wahlweise kann oder nicht."""
 
-    def __init__(self, name: str, verfuegbar: bool = True):
+    def __init__(self, name: str, verfuegbar: bool = True, guthaben: dict | None = None):
         self.name = name
         self.verfuegbar = verfuegbar
+        self._guthaben = guthaben
 
     def selbsttest(self):
         return {"zustand": "bereit" if self.verfuegbar else "aus", "ok": self.verfuegbar,
                 "guthaben": "unbekannt", "meldung": "", "hinweis": ""}
+
+
+class WegMitGedaechtnis(Weg):
+    """Wie `Weg`, merkt sich aber wie der Platform-Client den Guthabenstand."""
+
+    def guthaben_bekannt(self):
+        return self._guthaben or {}
 
 
 @pytest.fixture(autouse=True)
@@ -77,6 +85,74 @@ def test_ohne_jeden_weg_klare_ansage(monkeypatch):
     with pytest.raises(errors.KonfigurationsFehler) as info:
         videoquelle.aktiv()
     assert "MPW_VIDEO_CHAIN" in info.value.hinweis
+
+
+def test_leerer_topf_ueberlaesst_dem_naechsten_weg_den_vortritt(monkeypatch):
+    """Ein gültiger Schlüssel auf einem leeren Guthabentopf darf den Auftrag nicht an
+    sich reißen — sonst stünde der zweite Eintrag der Kette nur zur Zierde da."""
+    monkeypatch.setattr(config, "VIDEO_CHAIN", ("platform", "demo"))
+    leer = {"guthaben": False, "zeitpunkt": time.time()}
+    monkeypatch.setattr(videoquelle, "_wege",
+                        lambda: {"platform": WegMitGedaechtnis("Platform", guthaben=leer),
+                                 "abo": Weg("Abo", False), "demo": Weg("Demo")})
+    assert videoquelle.aktiv().name == "Demo"
+
+
+def test_alter_guthabenbefund_sperrt_nicht_fuer_immer(monkeypatch):
+    """Wer nachlädt, soll nicht ewig übersprungen werden: nach der Gedächtnisfrist
+    wird der Weg wieder probiert."""
+    monkeypatch.setattr(config, "VIDEO_CHAIN", ("platform", "demo"))
+    alt = {"guthaben": False, "zeitpunkt": time.time() - videoquelle.GEDAECHTNIS - 60}
+    monkeypatch.setattr(videoquelle, "_wege",
+                        lambda: {"platform": WegMitGedaechtnis("Platform", guthaben=alt),
+                                 "abo": Weg("Abo", False), "demo": Weg("Demo")})
+    assert videoquelle.aktiv().name == "Platform"
+
+
+def test_leerer_topf_ohne_ausweg_wird_trotzdem_versucht(monkeypatch):
+    """Gibt es keinen zweiten Weg, ist die Fehlermeldung des Dienstes selbst immer noch
+    besser als gar kein Versuch."""
+    monkeypatch.setattr(config, "VIDEO_CHAIN", ("platform",))
+    leer = {"guthaben": False, "zeitpunkt": time.time()}
+    monkeypatch.setattr(videoquelle, "_wege",
+                        lambda: {"platform": WegMitGedaechtnis("Platform", guthaben=leer),
+                                 "abo": Weg("Abo", False), "demo": Weg("Demo", False)})
+    assert videoquelle.aktiv().name == "Platform"
+
+
+# ── Ampel im Kopf ────────────────────────────────────────────────────────────
+
+def test_befund_ist_gruen_wenn_das_abo_verbunden_ist(monkeypatch):
+    monkeypatch.setattr(higgsfield_mcp, "angemeldet", lambda: True)
+    urteil = videoquelle.befund()
+    assert urteil["zustand"] == "ok"
+    assert "Abo" in urteil["meldung"]
+
+
+def test_befund_ist_gelb_bei_leerem_topf(monkeypatch):
+    """Die Ampel darf nicht grün leuchten, während nachweislich kein Guthaben da ist —
+    sonst fällt es erst mitten im Auftrag auf."""
+    monkeypatch.setattr(higgsfield.client, "guthaben_bekannt",
+                        lambda: {"guthaben": False, "zeitpunkt": time.time()})
+    urteil = videoquelle.befund()
+    assert urteil["zustand"] == "warnung"
+    assert "Abo verbinden" in urteil["hinweis"]
+
+
+def test_befund_bleibt_ohne_erfahrung_gruen(monkeypatch):
+    """Solange nichts Gegenteiliges bekannt ist, gilt ein hinterlegter Schlüssel als
+    in Ordnung — Schwarzmalerei ohne Grund wäre genauso falsch wie Schönfärberei."""
+    monkeypatch.setattr(higgsfield.client, "guthaben_bekannt", dict)
+    urteil = videoquelle.befund()
+    assert urteil["zustand"] == "ok"
+
+
+def test_befund_meldet_fehler_ohne_jeden_weg(monkeypatch):
+    monkeypatch.setattr(config, "VIDEO_CHAIN", ("platform",))
+    monkeypatch.setattr(type(higgsfield.client), "verfuegbar", property(lambda self: False))
+    urteil = videoquelle.befund()
+    assert urteil["zustand"] == "fehler"
+    assert urteil["ok"] is False
 
 
 def test_leere_kette_faellt_auf_platform_zurueck(monkeypatch):
