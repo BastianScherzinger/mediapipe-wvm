@@ -49,6 +49,13 @@ def freier_port(wunsch: int, versuche: int = 20) -> int:
 
 def voraussetzungen_melden() -> bool:
     """Zeigt den Startbericht im Terminal. Gibt zurück, ob alles Wesentliche steht."""
+    # Ohne Zeilenpufferung bleibt der Bericht unsichtbar, sobald die Ausgabe nicht
+    # direkt an ein Terminal geht (Startskript, Aufruf aus einem anderen Programm).
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
     befunde = config.diagnose()
     print(BALKEN)
     print(f"  {config.APP_NAME} {config.APP_VERSION}")
