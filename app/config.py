@@ -89,6 +89,11 @@ def _chain(name: str, default: str, erlaubt: tuple[str, ...]) -> tuple[str, ...]
 HIGGSFIELD_API_KEY: str = _str("HIGGSFIELD_API_KEY")
 ANTHROPIC_KEY: str = _str("ANTHROPIC_KEY")
 
+# Abo-Token für die Claude-CLI. Damit braucht der Rechner, auf dem das Werkzeug läuft,
+# keine eigene Anmeldung — entscheidend für die Übergabe an einen Kunden, der kein
+# Claude-Konto hat. Erzeugt wird ein solches Token mit `claude setup-token`.
+CLAUDE_OAUTH_TOKEN: str = _str("CLAUDE_CODE_OAUTH_TOKEN")
+
 # ── Anbieterketten ───────────────────────────────────────────────────────────
 LLM_CHAIN: tuple[str, ...] = _chain("MPW_LLM_CHAIN", "cli,api,local", ("cli", "api", "local"))
 VIDEO_CHAIN: tuple[str, ...] = _chain("MPW_VIDEO_CHAIN", "platform,demo", ("platform", "demo"))

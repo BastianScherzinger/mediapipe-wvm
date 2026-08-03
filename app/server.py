@@ -20,7 +20,7 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 from . import (config, errors, higgsfield, jobstore, library, llm, logbook, media,
-               pipeline, topics)
+               pipeline, topics, updater)
 
 QUELLE = "Server"
 
@@ -282,6 +282,37 @@ def anwendung_bauen() -> Flask:
         if not pfad.is_file():
             raise errors.EingabeFehler("Diese Datei gibt es nicht.", ursprung=QUELLE)
         return send_from_directory(pfad.parent, pfad.name, as_attachment=True)
+
+    # ── Aktualisierung ───────────────────────────────────────────────────────
+
+    @app.get("/api/aktualisierung")
+    def aktualisierung_pruefen():
+        """Liegt eine neuere Fassung im Repository? Mit `?schnell=1` ohne Netzzugriff."""
+        schnell = request.args.get("schnell") == "1"
+        return gut({"stand": updater.pruefen(mit_netz=not schnell)})
+
+    @app.post("/api/aktualisierung")
+    def aktualisierung_durchfuehren():
+        """Holt den neuen Stand und startet das Programm neu.
+
+        Die Antwort geht noch raus, bevor der Neustart greift — die Oberfläche weiß
+        dadurch, dass sie gleich die Verbindung verliert, und wartet auf den neuen Server.
+        """
+        ergebnis = updater.aktualisieren(neustart=True)
+        logbook.ereignis("neustart", {"grund": "Aktualisierung"})
+        return gut({"ergebnis": ergebnis})
+
+    @app.post("/api/neustart")
+    def neustart():
+        """Neustart ohne Aktualisierung — nützlich nach einer Änderung an der .env."""
+        if pipeline.laeuft_gerade():
+            raise errors.EingabeFehler(
+                "Es läuft gerade ein Auftrag.",
+                "Bitte warten oder abbrechen.", ursprung=QUELLE)
+        logbook.info(QUELLE, "Neustart auf Wunsch.")
+        logbook.ereignis("neustart", {"grund": "auf Wunsch"})
+        updater.neu_starten()
+        return gut({"neustart": True})
 
     # ── Betrieb ──────────────────────────────────────────────────────────────
 

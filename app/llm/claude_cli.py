@@ -41,11 +41,28 @@ def modellname() -> str:
     return config.CLAUDE_CLI_MODEL
 
 
+def mit_token() -> bool:
+    """Läuft die CLI über ein hinterlegtes Abo-Token statt über die Anmeldung des
+    Rechners? Für die Anzeige im Selbsttest."""
+    return bool(config.CLAUDE_OAUTH_TOKEN)
+
+
 def _umgebung() -> dict:
-    """Umgebung für den Aufruf: ohne API-Schlüssel, damit die Abo-Anmeldung greift."""
+    """Umgebung für den Aufruf.
+
+    Zwei Dinge sind hier entscheidend:
+
+    1. Liegt ein Abo-Token in der .env, wird es gesetzt. Damit läuft die CLI auch auf
+       einem Rechner, der nie `claude login` gesehen hat — genau das braucht ein Kunde,
+       dem das Werkzeug übergeben wird.
+    2. Ein API-Schlüssel in der Umgebung muss weg. Sonst nimmt die CLI den API-Weg statt
+       der Abo-Anmeldung und scheitert an fehlendem Guthaben, obwohl das Abo trägt.
+    """
     umgebung = os.environ.copy()
     umgebung.pop("ANTHROPIC_API_KEY", None)
     umgebung.pop("ANTHROPIC_KEY", None)
+    if config.CLAUDE_OAUTH_TOKEN:
+        umgebung["CLAUDE_CODE_OAUTH_TOKEN"] = config.CLAUDE_OAUTH_TOKEN
     return umgebung
 
 

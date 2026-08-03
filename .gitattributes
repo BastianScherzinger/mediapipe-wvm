@@ -1,0 +1,27 @@
+# Zeilenenden festnageln.
+#
+# Ohne diese Datei kann Git beim Klonen die Zeilenenden umstellen — und eine
+# Batchdatei mit reinen LF-Enden liest cmd.exe falsch: sie gibt dann wirres Zeug aus,
+# statt zu starten. Genau das war hier schon einmal der Fall.
+
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+*.py    text eol=lf
+*.js    text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.json  text eol=lf
+
+# Binärdateien niemals anfassen.
+*.mp4   binary
+*.mov   binary
+*.webm  binary
+*.gif   binary
+*.jpg   binary
+*.jpeg  binary
+*.png   binary
+*.db    binary

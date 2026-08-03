@@ -10,6 +10,14 @@ data/higgsfield_mcp_auth.json
 data/
 output/
 logs/
+
+# Markierung, dass die Pakete auf DIESEM Rechner eingerichtet sind. Käme sie mit ins
+# Repository, würde der nächste Rechner die Erstinstallation überspringen.
+.eingerichtet
+
+# Interne Arbeitsnotizen — sie nennen Pfade und Kontenverhältnisse, die in einem
+# öffentlichen Repository nichts verloren haben.
+CLAUDE.md
 *.db
 *.db-shm
 *.db-wal

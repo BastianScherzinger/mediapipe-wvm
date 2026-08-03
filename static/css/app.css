@@ -136,11 +136,42 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .glas {
   position: relative;
   background: var(--glas);
-  border: 1px solid var(--rand);
+  /* Der Rand ist durchsichtig: gezeichnet wird er vom Verlauf in ::before. Ohne diese
+     Reserve würde die Kante um einen Pixel springen, sobald der Verlauf aufliegt. */
+  border: 1px solid transparent;
   border-radius: var(--rund);
   backdrop-filter: blur(22px) saturate(120%);
-  box-shadow: var(--schatten);
+  background-clip: padding-box;
+  /* Zwei Schichten Schatten für die Tiefe, dazu ein sehr schwaches farbiges Bodenlicht —
+     wie ein LED-Streifen hinter einem Monitor. Kaum bewusst wahrnehmbar, aber die Boxen
+     lösen sich damit sichtbar vom Hintergrund. */
+  box-shadow: var(--schatten), 0 0 42px -14px rgba(34, 211, 238, .16);
   overflow: hidden;
+}
+
+/* LED-Rand: ein Verlauf, der nur den einen Pixel Rahmen ausfüllt.
+   Umgesetzt über zwei Masken, von denen die innere ausgestanzt wird — anders lässt sich
+   ein Rahmen mit Farbverlauf nicht sauber zeichnen. Oben links glimmt es kühl an, unten
+   rechts klingt es aus; dazwischen bleibt es fast neutral, damit nichts nach Neonreklame
+   aussieht. */
+.glas::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(148deg,
+      rgba(103, 232, 249, .34) 0%,
+      rgba(255, 255, 255, .13) 22%,
+      rgba(255, 255, 255, .05) 52%,
+      rgba(255, 255, 255, .07) 78%,
+      rgba(34, 211, 238, .20) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
 }
 
 /* Feiner Lichtsaum an der Oberkante — der Trick, der Glas wie Glas wirken lässt */
@@ -148,8 +179,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   content: "";
   position: absolute;
   inset: 0 0 auto 0;
+  z-index: 2;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.16), transparent);
+  background: linear-gradient(90deg, transparent 8%, rgba(255,255,255,.22) 50%,
+                              transparent 92%);
   pointer-events: none;
 }
 
@@ -219,6 +252,38 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .knopf-abbruch:hover:not(:disabled) { background: rgba(248,113,113,.12); border-color: rgba(248,113,113,.5); }
 
 .knopf-leise { padding: 7px 12px; font-size: 12px; color: var(--text-2); }
+
+/* Aktualisierungsknopf: grün, solange alles aktuell ist; gelb mit Anzahl, sobald
+   etwas bereitliegt. Die Farbe ist die eigentliche Botschaft — man soll im Vorbeigehen
+   erkennen, ob Handlungsbedarf besteht, ohne den Text zu lesen. */
+.knopf-aktualisierung[data-zustand="aktuell"] {
+  color: #7BE3BC;
+  border-color: rgba(52, 211, 153, .32);
+  background: rgba(52, 211, 153, .09);
+}
+.knopf-aktualisierung[data-zustand="aktuell"]:hover:not(:disabled) {
+  background: rgba(52, 211, 153, .16);
+  border-color: rgba(52, 211, 153, .5);
+}
+.knopf-aktualisierung[data-zustand="verfuegbar"] {
+  color: #FBD46A;
+  border-color: rgba(251, 191, 36, .42);
+  background: rgba(251, 191, 36, .12);
+  animation: pochen 2.6s ease-in-out infinite;
+}
+.knopf-aktualisierung[data-zustand="verfuegbar"]:hover:not(:disabled) {
+  background: rgba(251, 191, 36, .2);
+  border-color: rgba(251, 191, 36, .62);
+}
+.knopf-aktualisierung[data-zustand="unbekannt"],
+.knopf-aktualisierung[data-zustand="nicht_moeglich"] { color: var(--text-3); }
+.knopf-aktualisierung[data-laeuft="ja"] .icon { animation: drehen 1.1s linear infinite; }
+
+@keyframes pochen {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+  50%      { box-shadow: 0 0 14px -2px rgba(251, 191, 36, .45); }
+}
+@keyframes drehen { to { transform: rotate(360deg); } }
 
 .knopf-mini {
   padding: 6px;
@@ -468,12 +533,23 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
   height: calc(100vh - 54px);
 }
 .spalte-links { min-height: 0; display: flex; }
+
+/* Die rechte Spalte rollt als Ganzes.
+   Vorher lag hier ein Raster mit einer flexiblen letzten Zeile — bei kleinem Fenster
+   blieben für die Videos nur noch 67 Pixel übrig, die Kacheln wurden auf einen Streifen
+   zusammengedrückt und waren praktisch unsichtbar. Jetzt behalten alle drei Bereiche
+   ihre natürliche Höhe, und was nicht hineinpasst, wird herangerollt. */
 .spalte-rechts {
   min-height: 0; min-width: 0;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: var(--a4);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 3px;          /* damit der Rollbalken keinen Rand überdeckt */
+  scrollbar-gutter: stable;
 }
+.spalte-rechts > .glas { flex: 0 0 auto; }
 
 /* ── 6  Briefing links ───────────────────────────────────────────────────── */
 .glas-hoch { display: flex; flex-direction: column; width: 100%; min-height: 0; }
@@ -557,20 +633,23 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
 /* ── 7  Ablauf ───────────────────────────────────────────────────────────── */
 .ablauf-glas { flex: 0 0 auto; }
 
+/* Die fünf Blöcke passen sich immer in den Rahmen ein — kein seitliches Rollen.
+   Dafür müssen sie schrumpfen dürfen (`min-width: 0`), und die Verbindungen dazwischen
+   geben bei Enge zuerst nach. */
 .ablauf {
   display: flex;
   align-items: stretch;
   gap: 0;
-  padding: var(--a5) var(--a4);
-  overflow-x: auto;
+  padding: var(--a4);
+  overflow: hidden;
 }
 
 .block {
   position: relative;
   flex: 1 1 0;
-  min-width: 132px;
+  min-width: 0;
   display: flex; flex-direction: column; align-items: center; gap: 9px;
-  padding: var(--a3) var(--a2);
+  padding: var(--a3) 10px;
   border: 1px solid var(--rand);
   border-radius: var(--rund);
   background: rgba(0,0,0,.2);
@@ -673,10 +752,13 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
   50%      { opacity: 1; }
 }
 
-/* Verbindung mit wanderndem Punkt */
+/* Verbindung mit wanderndem Punkt.
+   Sie darf schrumpfen (bis auf 14 px), damit bei schmalem Fenster zuerst hier Platz
+   gespart wird und die Blöcke selbst lesbar bleiben. */
 .verbindung {
   position: relative;
-  flex: 0 0 44px;
+  flex: 0 1 40px;
+  min-width: 14px;
   align-self: center;
   height: 2px;
   margin: 0 2px;
@@ -704,15 +786,19 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
   background: var(--akzent);
   box-shadow: 0 0 10px 2px rgba(34,211,238,.7);
   opacity: 0;
-  will-change: transform, opacity;
+  will-change: left, opacity;
 }
 .punkt.wandert { animation: wandern 720ms var(--kurve) forwards; }
 
+/* Der Lauf geht über `left` in Prozent, nicht über einen festen Pixelwert: die
+   Verbindungen sind unterschiedlich breit, sobald sich das Fenster ändert, und ein
+   fester Weg würde den Punkt daneben enden lassen. */
 @keyframes wandern {
-  0%   { transform: translateX(-2px) scale(.5); opacity: 0; }
+  0%   { left: 0;    transform: translateX(-50%) scale(.5); opacity: 0; }
   18%  { opacity: 1; }
+  50%  { transform: translateX(-50%) scale(1); }
   82%  { opacity: 1; }
-  100% { transform: translateX(44px) scale(.5); opacity: 0; }
+  100% { left: 100%; transform: translateX(-50%) scale(.5); opacity: 0; }
 }
 
 /* Vorschau des Startbilds im Bild-Block */
@@ -738,7 +824,10 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
   margin: 0;
   padding: var(--a2) 0;
   list-style: none;
-  height: 168px;
+  /* Bewusst knapp gehalten: der Platz gehört den Videokacheln darunter, die bei
+     üblicher Fenstergröße ohne Rollen sichtbar sein sollen. Sieben Zeilen genügen,
+     um zu erkennen, was gerade passiert; der Rest wird herangerollt. */
+  height: 122px;
   overflow-y: auto;
   font-family: var(--schrift-fest);
   font-size: 11.5px;
@@ -766,20 +855,22 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
 @keyframes einlaufen { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 
 /* ── 9  Videos ───────────────────────────────────────────────────────────── */
-.biblio-glas { display: flex; flex-direction: column; min-height: 0; }
+.biblio-glas { display: flex; flex-direction: column; }
 .biblio {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
   padding: var(--a4);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
   gap: var(--a3);
+  /* `start` in beiden Richtungen: die Kacheln behalten ihre eigene Höhe, statt sich auf
+     die Höhe des Bereichs strecken oder stauchen zu lassen. Gerollt wird eine Ebene
+     darüber, in der rechten Spalte. */
   align-content: start;
+  align-items: start;
 }
 
 .karte {
   display: flex; flex-direction: column;
+  min-height: 0;
   background: rgba(0,0,0,.24);
   border: 1px solid var(--rand);
   border-radius: var(--rund);

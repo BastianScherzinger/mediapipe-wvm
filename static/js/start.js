@@ -33,6 +33,7 @@
     MPW.ablauf.aufbauen(start.bloecke);
     MPW.formular.aufbauen(start);
     MPW.bibliothek.aufbauen();
+    MPW.aktualisierung.aufbauen();
 
     lampenSetzen(start.diagnose);
     $("#btn-selbsttest").addEventListener("click", selbsttest);
@@ -58,6 +59,7 @@
       const antwort = await MPW.hole("/api/zustand");
       laufenderAuftrag = antwort.laufender_auftrag || "";
       MPW.formular.sperren(Boolean(laufenderAuftrag));
+      MPW.aktualisierung.auftragszustand(Boolean(laufenderAuftrag));
 
       if (laufenderAuftrag && antwort.auftrag) {
         // Die Blöcke vor dem aktuellen sind fertig, der aktuelle arbeitet. Das ist eine
@@ -126,11 +128,14 @@
     if (nachricht.aktion === "gestartet") {
       laufenderAuftrag = nachricht.auftrag?.id || laufenderAuftrag;
       MPW.formular.sperren(true);
+      // Kein Neustart, solange Guthaben in Arbeit ist.
+      MPW.aktualisierung.auftragszustand(true);
       return;
     }
     if (["fertig", "fehler", "abgebrochen"].includes(nachricht.aktion)) {
       laufenderAuftrag = "";
       MPW.formular.sperren(false);
+      MPW.aktualisierung.auftragszustand(false);
     }
     if (nachricht.aktion === "fertig") {
       const titel = nachricht.ergebnis?.titel || "Video";

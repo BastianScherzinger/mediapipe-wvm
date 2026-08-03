@@ -1,0 +1,247 @@
+"""
+updater.py — Aktualisierung aus dem Git-Repository, mit anschließendem Neustart.
+
+Der Kunde soll neue Fassungen holen können, ohne ein Terminal zu öffnen: ein Knopf im
+Dashboard, der den Stand prüft, den neuen Code holt und das Programm neu startet.
+
+Drei Dinge sind dabei wichtig:
+
+  * **Nur vorspulen.** `git pull --ff-only` — es wird nie zusammengeführt und nie etwas
+    überschrieben. Gibt es lokale Änderungen, bricht die Aktualisierung mit einer
+    verständlichen Meldung ab, statt Arbeit zu vernichten.
+  * **Nie mitten in einem Auftrag.** Ein Neustart während einer laufenden Videoerzeugung
+    würde Guthaben verbrennen. Der Aufrufer prüft das, und dieses Modul prüft es noch
+    einmal selbst.
+  * **Der Neustart überlebt den eigenen Tod.** Ein Prozess kann sich nicht selbst neu
+    starten. Deshalb wird ein losgelöster Helfer gestartet, der wartet, bis dieser
+    Prozess weg ist, und dann das Programm erneut aufruft.
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+from . import config, errors, logbook
+
+QUELLE = "Aktualisierung"
+
+#: Wie lange ein Git-Aufruf höchstens dauern darf. Ohne Netz hängt `fetch` sonst ewig.
+_ZEITLIMIT = 45
+
+#: Ergebnis der letzten Prüfung, damit die Oberfläche nicht bei jedem Blick ins Netz muss.
+_stand: dict = {}
+_stand_zeit: float = 0.0
+_sperre = threading.Lock()
+
+
+def _git(*argumente: str, zeitlimit: int = _ZEITLIMIT) -> tuple[int, str]:
+    """Führt einen Git-Befehl im Projektordner aus. Gibt (Rückgabewert, Ausgabe)."""
+    try:
+        lauf = subprocess.run(
+            ["git", *argumente],
+            cwd=str(config.BASE_DIR), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=zeitlimit,
+            # Git darf unter keinen Umständen nach einem Passwort fragen — das würde
+            # den Aufruf blockieren, bis das Zeitlimit greift.
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"},
+        )
+        return lauf.returncode, ((lauf.stdout or "") + (lauf.stderr or "")).strip()
+    except FileNotFoundError:
+        return -1, "git wurde nicht gefunden"
+    except subprocess.TimeoutExpired:
+        return -2, f"git hat nach {zeitlimit} Sekunden nicht geantwortet"
+    except Exception as fehler:
+        return -3, f"{type(fehler).__name__}: {fehler}"
+
+
+def ist_git_ordner() -> bool:
+    code, _ = _git("rev-parse", "--git-dir", zeitlimit=10)
+    return code == 0
+
+
+def _kurzstand() -> dict:
+    """Aktueller Stand ohne Netzzugriff."""
+    _, beschreibung = _git("log", "-1", "--format=%h %cd", "--date=format:%d.%m.%Y",
+                           zeitlimit=10)
+    _, zweig = _git("rev-parse", "--abbrev-ref", "HEAD", zeitlimit=10)
+    return {"version": beschreibung or "unbekannt", "zweig": zweig or "?"}
+
+
+def pruefen(mit_netz: bool = True) -> dict:
+    """Prüft, ob im Repository neuere Fassungen liegen.
+
+    Rückgabe (immer alle Felder, damit die Oberfläche nichts abfangen muss):
+        moeglich   — kann überhaupt aktualisiert werden?
+        anzahl     — wie viele neue Änderungen liegen bereit
+        zustand    — 'aktuell' | 'verfuegbar' | 'unbekannt' | 'nicht_moeglich'
+        meldung    — ein Satz für den Benutzer
+    """
+    global _stand, _stand_zeit
+
+    if not ist_git_ordner():
+        return {"moeglich": False, "anzahl": 0, "zustand": "nicht_moeglich",
+                "meldung": "Dieser Ordner ist keine Git-Arbeitskopie.",
+                "hinweis": "Aktualisieren geht nur, wenn das Programm mit „git clone“ "
+                           "geholt wurde.", **_kurzstand()}
+
+    code, ausgabe = _git("remote", "get-url", "origin", zeitlimit=10)
+    if code != 0:
+        return {"moeglich": False, "anzahl": 0, "zustand": "nicht_moeglich",
+                "meldung": "Es ist kein Repository hinterlegt.",
+                "hinweis": "Ohne Fernverweis („origin“) gibt es nichts zu holen.",
+                **_kurzstand()}
+
+    if not mit_netz:
+        with _sperre:
+            if _stand:
+                return dict(_stand)
+
+    code, ausgabe = _git("fetch", "--quiet", "origin")
+    if code != 0:
+        antwort = {"moeglich": True, "anzahl": 0, "zustand": "unbekannt",
+                   "meldung": "Der Stand ließ sich nicht abfragen.",
+                   "hinweis": config.entschaerfe(ausgabe[:200]) or
+                              "Vermutlich keine Internetverbindung.",
+                   **_kurzstand()}
+        with _sperre:
+            _stand, _stand_zeit = antwort, time.monotonic()
+        return antwort
+
+    # Wie viele Änderungen liegen vor uns? `@{u}` ist der zugehörige Zweig im Repository.
+    code, ausgabe = _git("rev-list", "--count", "HEAD..@{u}", zeitlimit=15)
+    if code != 0:
+        # Kein zugehöriger Zweig eingerichtet — den Hauptzweig direkt versuchen.
+        code, ausgabe = _git("rev-list", "--count", "HEAD..origin/main", zeitlimit=15)
+    try:
+        anzahl = int((ausgabe or "0").strip().splitlines()[0])
+    except (ValueError, IndexError):
+        anzahl = 0
+
+    antwort = {
+        "moeglich": True,
+        "anzahl": anzahl,
+        "zustand": "verfuegbar" if anzahl > 0 else "aktuell",
+        "meldung": (f"{anzahl} Aktualisierung{'en' if anzahl != 1 else ''} verfügbar."
+                    if anzahl else "Das Programm ist auf dem neuesten Stand."),
+        "hinweis": "",
+        **_kurzstand(),
+    }
+    with _sperre:
+        _stand, _stand_zeit = antwort, time.monotonic()
+    return antwort
+
+
+def _saubere_arbeitskopie() -> tuple[bool, str]:
+    """Gibt es lokale Änderungen, die ein Vorspulen verhindern würden?"""
+    code, ausgabe = _git("status", "--porcelain", "--untracked-files=no", zeitlimit=15)
+    if code != 0:
+        return False, "Der Zustand der Arbeitskopie ließ sich nicht prüfen."
+    if ausgabe.strip():
+        geaendert = [z[3:] for z in ausgabe.splitlines()[:5]]
+        return False, ("Es gibt lokale Änderungen: " + ", ".join(geaendert) +
+                       ". Sie würden beim Aktualisieren im Weg stehen.")
+    return True, ""
+
+
+def aktualisieren(neustart: bool = True) -> dict:
+    """Holt den neuen Stand und startet das Programm neu.
+
+    Wirft einen erklärten Fehler, wenn etwas im Weg steht — der Aufrufer reicht die
+    Meldung unverändert an die Oberfläche weiter.
+    """
+    from . import pipeline          # spät geladen, sonst gäbe es einen Ringschluss
+
+    laufend = pipeline.laeuft_gerade()
+    if laufend:
+        raise errors.EingabeFehler(
+            "Es läuft gerade ein Auftrag.",
+            "Ein Neustart mitten in der Videoerzeugung würde Guthaben verbrennen. "
+            "Bitte warten oder abbrechen.", ursprung=QUELLE)
+
+    if not ist_git_ordner():
+        raise errors.KonfigurationsFehler(
+            "Dieser Ordner ist keine Git-Arbeitskopie.",
+            "Aktualisieren geht nur, wenn das Programm mit „git clone“ geholt wurde.",
+            ursprung=QUELLE)
+
+    sauber, grund = _saubere_arbeitskopie()
+    if not sauber:
+        raise errors.KonfigurationsFehler(
+            "Die Aktualisierung wurde nicht durchgeführt.", grund, ursprung=QUELLE)
+
+    logbook.info(QUELLE, "Neuer Stand wird geholt …")
+    # Ausschließlich vorspulen: nie zusammenführen, nie etwas überschreiben.
+    code, ausgabe = _git("pull", "--ff-only", "--quiet")
+    if code != 0:
+        raise errors.AnbieterFehler(
+            "Der neue Stand ließ sich nicht holen.",
+            config.entschaerfe(ausgabe[:300]) or "Keine nähere Angabe von git.",
+            ursprung=QUELLE)
+
+    stand = _kurzstand()
+    logbook.erfolg(QUELLE, f"Aktualisiert auf {stand['version']}.")
+
+    # Neue oder geänderte Pakete nachziehen. Schlägt das fehl, ist das kein Grund zum
+    # Abbruch — meist ändert sich an den Abhängigkeiten gar nichts.
+    logbook.info(QUELLE, "Abhängigkeiten werden geprüft …")
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q",
+                        "--disable-pip-version-check", "-r", "requirements.txt"],
+                       cwd=str(config.BASE_DIR), capture_output=True, timeout=300)
+    except Exception as fehler:
+        logbook.warnung(QUELLE, f"Pakete nicht geprüft ({type(fehler).__name__}) — "
+                                "das Programm startet trotzdem neu.")
+
+    if neustart:
+        logbook.info(QUELLE, "Das Programm startet in wenigen Sekunden neu.")
+        neu_starten()
+
+    return {"ok": True, "version": stand["version"],
+            "meldung": f"Aktualisiert auf {stand['version']}. Das Programm startet neu."}
+
+
+def neu_starten(verzoegerung: float = 1.5) -> None:
+    """Startet das Programm neu.
+
+    Ein Prozess kann sich nicht selbst wiederbeleben. Es wird deshalb ein losgelöster
+    Helfer gestartet, der kurz wartet, bis dieser Prozess beendet ist, und dann das
+    Programm erneut aufruft. Der Helfer hängt an keinem Fenster und keiner Konsole —
+    sonst würde er mit uns zusammen sterben.
+    """
+    startbefehl = [sys.executable, str(config.BASE_DIR / "run.py")]
+    # Die Aufrufparameter des laufenden Programms übernehmen (etwa --browser).
+    startbefehl += [a for a in sys.argv[1:] if a not in ("--pruefen",)]
+
+    helfer = (
+        "import subprocess, sys, time\n"
+        f"time.sleep({max(0.5, verzoegerung)})\n"
+        f"subprocess.Popen({startbefehl!r}, cwd={str(config.BASE_DIR)!r})\n"
+    )
+
+    losgeloest = 0
+    if sys.platform == "win32":
+        losgeloest = (getattr(subprocess, "DETACHED_PROCESS", 0x00000008) |
+                      getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
+
+    try:
+        subprocess.Popen([sys.executable, "-c", helfer],
+                         cwd=str(config.BASE_DIR), creationflags=losgeloest,
+                         close_fds=True)
+    except Exception as fehler:
+        raise errors.VerarbeitungsFehler(
+            "Der Neustart ließ sich nicht anstoßen.",
+            f"Bitte das Programm von Hand neu starten. ({type(fehler).__name__})",
+            ursprung=QUELLE) from fehler
+
+    def beenden():
+        time.sleep(max(0.3, verzoegerung - 0.8))
+        logbook.beenden()
+        # Hart beenden: ein sauberes Herunterfahren würde am wartenden Ereignisstrom
+        # und am Fenster hängen bleiben.
+        os._exit(0)
+
+    threading.Thread(target=beenden, name="neustart", daemon=True).start()
