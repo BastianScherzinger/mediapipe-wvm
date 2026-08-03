@@ -32,18 +32,34 @@ from app import config, logbook
 BALKEN = "═" * 68
 
 
+def _port_frei(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as pruefer:
+        pruefer.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            pruefer.bind((config.HOST, port))
+            return True
+        except OSError:
+            return False
+
+
 def freier_port(wunsch: int, versuche: int = 20) -> int:
-    """Erster freier Port ab dem Wunschport. Verhindert den häufigsten Startfehler
-    überhaupt: „Port bereits belegt“, weil noch eine alte Sitzung läuft."""
-    for versatz in range(versuche):
-        port = wunsch + versatz
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as pruefer:
-            pruefer.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                pruefer.bind((config.HOST, port))
-                return port
-            except OSError:
-                continue
+    """Erster freier Port ab dem Wunschport.
+
+    Auf den Wunschport wird kurz gewartet, bevor ausgewichen wird. Das ist für den
+    Neustart nach einer Aktualisierung wichtig: der eben beendete Server gibt den Port
+    manchmal erst nach einem Augenblick frei, und die wartende Oberfläche sucht den
+    neuen Server genau dort — auf einem anderen Port fände sie ihn nie wieder.
+    """
+    for _ in range(16):                       # bis zu vier Sekunden auf den Wunsch warten
+        if _port_frei(wunsch):
+            return wunsch
+        time.sleep(0.25)
+
+    for versatz in range(1, versuche):
+        if _port_frei(wunsch + versatz):
+            logbook.warnung("Start", f"Port {wunsch} ist belegt — es wird "
+                                     f"{wunsch + versatz} verwendet.")
+            return wunsch + versatz
     raise RuntimeError(f"Zwischen {wunsch} und {wunsch + versuche} ist kein Port frei.")
 
 
