@@ -81,30 +81,12 @@ def anwendung_bauen() -> Flask:
 
     # ── Grunddaten ───────────────────────────────────────────────────────────
 
-    def diagnose_mit_videoweg() -> dict:
-        """Die Startdiagnose, aber mit dem ehrlichen Urteil über den Videoweg.
-
-        `config.diagnose()` kennt nur die .env und sieht deshalb einen hinterlegten
-        Schlüssel als „in Ordnung“ an. Für die Ampel ist das zu wenig: ein gültiger
-        Schlüssel auf einem leeren Guthabentopf erzeugt kein einziges Video. Der Befund
-        wird deshalb hier durch den der Videoquelle ersetzt — die weiß auch vom Abo.
-        """
-        kurz = config.diagnose_kurz()
-        urteil = videoquelle.befund()
-        for eintrag in kurz["befunde"]:
-            if eintrag["name"] == "Higgsfield":
-                eintrag.update(urteil)
-        fehler = [e for e in kurz["befunde"] if e["zustand"] == "fehler"]
-        kurz["startbereit"] = not fehler
-        kurz["anzahl_fehler"] = len(fehler)
-        return kurz
-
     @app.get("/api/start")
     def startdaten():
         """Alles, was die Oberfläche einmalig beim Laden braucht."""
         return gut({
             "app": {"name": config.APP_NAME, "version": config.APP_VERSION},
-            "diagnose": diagnose_mit_videoweg(),
+            "diagnose": videoquelle.startbericht(),
             "katalog": topics.katalog(),
             "videomodelle": higgsfield.VIDEOMODELLE,
             "bildmodelle": higgsfield.BILDMODELLE,
@@ -132,7 +114,7 @@ def anwendung_bauen() -> Flask:
     def selbsttest():
         """Prüft alle Bausteine — ohne Guthaben zu verbrauchen."""
         ergebnis = {
-            "system": diagnose_mit_videoweg(),
+            "system": videoquelle.startbericht(),
             "higgsfield": higgsfield.client.selbsttest(),
             "ffmpeg": media.selbsttest(),
             "sprachmodelle": llm.verfuegbare_wege(),

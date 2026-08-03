@@ -313,6 +313,16 @@ def diagnose() -> list[Befund]:
     return befunde
 
 
+#: Wie die Befunde dem Kunden gegenüber heißen. Die inneren Namen bleiben unverändert —
+#: Oberfläche und Tests hängen daran —, aber „Sprachmodell“ lässt an Sprachausgabe
+#: denken und „ffmpeg“ ist ein Programmname. Angezeigt wird, was die Sache *tut*.
+ANZEIGENAMEN = {"Sprachmodell": "Drehbuch", "ffmpeg": "Videoschnitt"}
+
+
+def anzeigename(name: str) -> str:
+    return ANZEIGENAMEN.get(name, name)
+
+
 def diagnose_kurz() -> dict:
     """Verdichtet die Diagnose zu einer Ampel für die Oberfläche."""
     befunde = diagnose()

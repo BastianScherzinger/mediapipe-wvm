@@ -168,6 +168,22 @@ class Mitschrift:
         return [n for n in self.einlesen() if n.get("typ") == "ereignis"
                 and n.get("name") == name]
 
+    def warten_auf(self, name: str, aktion: str, grenze: float = 10.0) -> list[dict]:
+        """Wartet, bis ein bestimmtes Ereignis eingetroffen ist.
+
+        Der Auftragsspeicher wird **vor** dem Ereignis geschrieben (`pipeline._bearbeiten`).
+        Wer also nur auf den Zustand wartet und danach sofort in die Warteschlange sieht,
+        kann das Ereignis um Sekundenbruchteile verpassen — unter Last reicht das für
+        einen sprunghaften Test.
+        """
+        ende = time.monotonic() + grenze
+        while time.monotonic() < ende:
+            treffer = [e for e in self.ereignisse(name) if e.get("aktion") == aktion]
+            if treffer:
+                return treffer
+            time.sleep(0.1)
+        return []
+
     def schliessen(self):
         logbook.abbestellen(self.warteschlange)
 
@@ -231,6 +247,10 @@ def test_storyboard_von_der_eingabe_bis_zum_fertigen_film(studio):
         assert "gif" in fehlend and "web" in fehlend      # bewusst nicht bestellt
 
         # ── Was die Oberfläche gesehen hätte ────────────────────────────────
+        # Erst abwarten, bis das Schlussereignis da ist: der Auftragsspeicher wird
+        # vor den Ereignissen geschrieben, sonst liest der Test zu früh.
+        assert mitschrift.warten_auf("auftrag", "fertig"), "Schlussmeldung fehlt"
+
         bloecke = mitschrift.ereignisse("block")
         fertige = {e["block"] for e in bloecke if e["zustand"] == "fertig"}
         assert fertige == {"briefing", "claude", "bild", "video", "ausgabe"}, \
@@ -313,9 +333,8 @@ def test_fehler_mitten_im_lauf_wird_sauber_gemeldet(tmp_path, monkeypatch):
         assert "absichtlich" in fertig.fehler["meldung"]
         assert fertig.fehler["art"] == "anbieter"
 
-        fehlerereignisse = [e for e in mitschrift.ereignisse("auftrag")
-                            if e.get("aktion") == "fehler"]
-        assert fehlerereignisse, "die Oberfläche muss vom Fehler erfahren"
+        assert mitschrift.warten_auf("auftrag", "fehler"), \
+            "die Oberfläche muss vom Fehler erfahren"
         # Das Wichtigste: das Programm läuft weiter und nimmt sofort neue Aufträge an.
         assert pipeline.laeuft_gerade() == ""
     finally:

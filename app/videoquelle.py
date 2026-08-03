@@ -224,6 +224,25 @@ def befund() -> dict:
                        + ausweichen}
 
 
+def startbericht() -> dict:
+    """`config.diagnose_kurz()`, aber mit dem ehrlichen Urteil über den Videoweg.
+
+    `config.diagnose()` kennt nur die .env und sieht deshalb einen hinterlegten
+    Schlüssel als „in Ordnung“ an. Für die Ampel und den Startbericht ist das zu wenig:
+    ein gültiger Schlüssel auf einem leeren Guthabentopf erzeugt kein einziges Video.
+    Terminal und Fenster sollen dasselbe sagen — deshalb steht das hier an einer Stelle.
+    """
+    kurz = config.diagnose_kurz()
+    urteil = befund()
+    for eintrag in kurz["befunde"]:
+        if eintrag["name"] == "Higgsfield":
+            eintrag.update(urteil)
+    fehler = [e for e in kurz["befunde"] if e["zustand"] == "fehler"]
+    kurz["startbereit"] = not fehler
+    kurz["anzahl_fehler"] = len(fehler)
+    return kurz
+
+
 def uebersicht() -> list[dict]:
     """Für den Selbsttest: welcher Weg kann, welcher nicht und warum."""
     ergebnis = []

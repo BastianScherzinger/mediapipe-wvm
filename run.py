@@ -72,18 +72,24 @@ def voraussetzungen_melden() -> bool:
     except Exception:
         pass
 
-    befunde = config.diagnose()
+    # Derselbe Bericht wie im Fenster — sonst sagt das Terminal „ok“, während die Lampe
+    # im Dashboard auf Gelb steht. Deshalb `videoquelle.startbericht()` statt
+    # `config.diagnose()`: nur das kennt den Guthabenstand und das Abo.
+    from app import videoquelle
+    bericht = videoquelle.startbericht()
+
     print(BALKEN)
     print(f"  {config.APP_NAME} {config.APP_VERSION}")
     print(BALKEN)
 
     alles_gut = True
-    for befund in befunde:
-        zeichen = {"ok": "[ok]", "warnung": "[!]", "fehler": "[X]"}.get(befund.zustand, "[?]")
-        print(f"  {zeichen:<5} {befund.name:<16} {befund.meldung}")
-        if befund.hinweis:
-            print(f"        {'':<16} → {befund.hinweis}")
-        if befund.zustand == "fehler":
+    for befund in bericht["befunde"]:
+        zeichen = {"ok": "[ok]", "warnung": "[!]",
+                   "fehler": "[X]"}.get(befund["zustand"], "[?]")
+        print(f"  {zeichen:<5} {config.anzeigename(befund['name']):<16} {befund['meldung']}")
+        if befund["hinweis"]:
+            print(f"        {'':<16} → {befund['hinweis']}")
+        if befund["zustand"] == "fehler":
             alles_gut = False
 
     print(BALKEN)

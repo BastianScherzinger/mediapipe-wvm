@@ -546,6 +546,14 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
 
 .kopf-status { display: flex; align-items: center; gap: var(--a2); }
 
+/* Trennt die drei Lämpchen (Zustand) von den Knöpfen (Handlung). Ohne die Linie
+   stünde der Abo-Knopf mitten in der Ampelreihe und zerschnitte sie. */
+.kopf-trenner {
+  width: 1px; height: 18px;
+  margin: 0 2px;
+  background: var(--rand);
+}
+
 .lampe {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 6px 11px;
