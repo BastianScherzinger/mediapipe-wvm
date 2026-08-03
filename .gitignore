@@ -1,0 +1,30 @@
+# ── Zugangsdaten — NIEMALS ins Repository ───────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.key
+*_auth.json
+data/higgsfield_mcp_auth.json
+
+# ── Laufzeitdaten ───────────────────────────────────────────────────────────
+data/
+output/
+logs/
+*.db
+*.db-shm
+*.db-wal
+
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+
+# ── Betriebssystem / Editor ─────────────────────────────────────────────────
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/

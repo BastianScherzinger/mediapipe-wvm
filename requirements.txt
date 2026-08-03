@@ -1,0 +1,17 @@
+# MEDIAPIPE WVM — Abhängigkeiten
+# Installation:  python -m pip install -r requirements.txt
+
+Flask==3.0.3            # lokaler Anwendungsserver
+waitress==3.0.2         # belastbarer Server statt Entwicklungsserver
+python-dotenv==1.2.2    # Zugänge aus der .env laden
+httpx==0.28.1           # HTTP-Client mit Zeitlimits (Higgsfield, Ollama)
+pywebview==6.2.1        # eigenes Desktop-Fenster
+imageio-ffmpeg==0.6.0   # mitgeliefertes ffmpeg, falls keines im System liegt
+Pillow==11.3.0          # Bildprüfung und Poster-Bilder
+
+# Optional — nur nötig, wenn der Anthropic-API-Weg genutzt wird.
+# Ohne dieses Paket laufen Claude-CLI und lokale KI unverändert weiter.
+anthropic>=0.105,<1.0
+
+# Nur für die Testsuite:
+#   python -m pip install pytest

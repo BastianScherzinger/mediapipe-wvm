@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MEDIAPIPE WVM — KI-Video-Studio</title>
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+
+<!-- Iconsatz: ein Set, einheitliche Strichstärke, 24×24. Inline eingebettet, damit
+     keine einzige Datei von außen nachgeladen werden muss. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <g id="i-briefing"><path d="M7 4h7l5 5v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"/><path d="M14 4v5h5"/><path d="M9 13h6M9 17h4"/></g>
+    <g id="i-claude"><path d="M12 3.5 13.9 9l5.6 1.9-5.6 1.9L12 18.4l-1.9-5.6L4.5 10.9 10.1 9 12 3.5Z"/><path d="M18.5 4.5v3M20 6h-3"/></g>
+    <g id="i-bild"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 4.5-4.2a1.6 1.6 0 0 1 2.2 0L15 17"/><path d="m13.5 14.5 1.8-1.7a1.6 1.6 0 0 1 2.2 0L20 15"/></g>
+    <g id="i-film"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 5v14M16 5v14M3 12h18M3 8.5h5M3 15.5h5M16 8.5h5M16 15.5h5"/></g>
+    <g id="i-ausgabe"><path d="M4 7.5A1.5 1.5 0 0 1 5.5 6h4l2 2.5h7A1.5 1.5 0 0 1 20 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-10Z"/><path d="m10 13.5 1.8 1.8 3.4-3.6"/></g>
+    <g id="i-play"><path d="M8 5.5v13l10.5-6.5L8 5.5Z"/></g>
+    <g id="i-pfeil"><path d="M5 12h13M13 7l5 5-5 5"/></g>
+    <g id="i-download"><path d="M12 4v10M8 11l4 4 4-4M5 19h14"/></g>
+    <g id="i-ordner"><path d="M4 7.5A1.5 1.5 0 0 1 5.5 6h4l2 2.5h7A1.5 1.5 0 0 1 20 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-10Z"/></g>
+    <g id="i-muell"><path d="M5 7h14M10 7V5.5A1.5 1.5 0 0 1 11.5 4h1A1.5 1.5 0 0 1 14 5.5V7"/><path d="M6.5 7 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/><path d="M10.5 11v5M13.5 11v5"/></g>
+    <g id="i-stift"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="m14.5 7.5 2 2"/></g>
+    <g id="i-stopp"><rect x="6.5" y="6.5" width="11" height="11" rx="1.6"/></g>
+    <g id="i-lupe"><circle cx="11" cy="11" r="6"/><path d="m15.5 15.5 4 4"/></g>
+    <g id="i-haken"><path d="m5 12.5 4.5 4.5L19 7"/></g>
+    <g id="i-kopieren"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></g>
+    <g id="i-neu"><path d="M4 12a8 8 0 1 1 2.5 5.8"/><path d="M4 18v-5h5"/></g>
+    <g id="i-schliessen"><path d="m7 7 10 10M17 7 7 17"/></g>
+  </defs>
+</svg>
+
+<header class="kopf">
+  <div class="kopf-marke">
+    <span class="kopf-punkt" aria-hidden="true"></span>
+    <h1>MEDIAPIPE <span>WVM</span></h1>
+    <span class="kopf-untertitel">KI-Video-Studio</span>
+  </div>
+  <div class="kopf-status">
+    <button class="lampe" id="lampe-higgsfield" type="button">
+      <span class="lampe-punkt"></span>Higgsfield
+    </button>
+    <button class="lampe" id="lampe-claude" type="button">
+      <span class="lampe-punkt"></span>Sprachmodell
+    </button>
+    <button class="lampe" id="lampe-ffmpeg" type="button">
+      <span class="lampe-punkt"></span>ffmpeg
+    </button>
+    <button class="knopf knopf-leise" id="btn-selbsttest" type="button">
+      <svg class="icon" viewBox="0 0 24 24"><use href="#i-lupe"/></svg>Selbsttest
+    </button>
+  </div>
+</header>
+
+<main class="raster">
+
+  <!-- ══ Links: Briefing ══════════════════════════════════════════════════ -->
+  <section class="spalte-links" aria-label="Briefing">
+    <div class="glas glas-hoch">
+      <div class="reiter" role="tablist" aria-label="Eingabeart">
+        <button class="reiter-knopf ist-an" id="reiter-formular" role="tab"
+                aria-selected="true" aria-controls="feld-formular">Formular</button>
+        <button class="reiter-knopf" id="reiter-frei" role="tab"
+                aria-selected="false" aria-controls="feld-frei">Eigener Prompt</button>
+      </div>
+
+      <div class="rollbereich">
+
+        <!-- ── Formular ── -->
+        <div id="feld-formular" role="tabpanel" aria-labelledby="reiter-formular">
+          <fieldset class="feldgruppe">
+            <legend>Thema</legend>
+            <div class="themen" id="themen" role="radiogroup" aria-label="Thema"></div>
+          </fieldset>
+
+          <fieldset class="feldgruppe">
+            <legend><label for="betreff">Worum geht es?</label></legend>
+            <input type="text" id="betreff" class="eingabe" autocomplete="off"
+                   placeholder="z. B. eine Handwerksbäckerei in Mannheim">
+            <p class="hinweis">Ein Halbsatz genügt — daraus entsteht das Drehbuch.</p>
+          </fieldset>
+
+          <div id="zusatzfelder"></div>
+
+          <fieldset class="feldgruppe">
+            <legend>Merkmale</legend>
+            <div id="argumentgruppen"></div>
+          </fieldset>
+
+          <fieldset class="feldgruppe">
+            <legend>Das geht an Claude</legend>
+            <p class="vorschau" id="briefing-vorschau">Thema wählen und kurz beschreiben,
+              worum es geht.</p>
+          </fieldset>
+        </div>
+
+        <!-- ── Eigener Prompt ── -->
+        <div id="feld-frei" role="tabpanel" aria-labelledby="reiter-frei" hidden>
+          <fieldset class="feldgruppe">
+            <legend><label for="freitext">Ihr Prompt</label></legend>
+            <textarea id="freitext" class="eingabe eingabe-flaeche" rows="10"
+              placeholder="Beschreiben Sie die Szene so genau wie möglich — Motiv, Licht, Kamera, Stimmung."></textarea>
+            <p class="hinweis"><span id="freitext-zaehler">0</span> Zeichen</p>
+          </fieldset>
+
+          <fieldset class="feldgruppe">
+            <label class="schalter">
+              <input type="checkbox" id="woertlich">
+              <span class="schalter-spur"><span class="schalter-knauf"></span></span>
+              <span class="schalter-text">Wörtlich verwenden
+                <em>Ohne Häkchen arbeitet Claude Ihren Prompt zu einem Profi-Prompt aus.</em></span>
+            </label>
+          </fieldset>
+        </div>
+
+        <!-- ── Gemeinsame Einstellungen ── -->
+        <fieldset class="feldgruppe">
+          <legend>Länge</legend>
+          <div class="segment" role="radiogroup" aria-label="Art des Videos">
+            <button class="segment-knopf ist-an" type="button" data-laenge="einzel"
+                    role="radio" aria-checked="true">Einzelclip</button>
+            <button class="segment-knopf" type="button" data-laenge="story"
+                    role="radio" aria-checked="false">Storyboard</button>
+          </div>
+          <div id="story-regler" hidden>
+            <label class="regler-zeile" for="szenen">
+              <span>Szenen</span><output id="szenen-wert">5</output>
+            </label>
+            <input type="range" id="szenen" min="2" max="12" value="5" class="regler">
+          </div>
+          <p class="hinweis" id="laenge-hinweis"></p>
+        </fieldset>
+
+        <fieldset class="feldgruppe">
+          <legend><label for="videomodell">Modell</label></legend>
+          <select id="videomodell" class="eingabe"></select>
+          <p class="hinweis" id="modell-hinweis"></p>
+        </fieldset>
+
+        <details class="mehr">
+          <summary>Weitere Einstellungen</summary>
+          <fieldset class="feldgruppe">
+            <legend><label for="verhaeltnis">Bildformat</label></legend>
+            <select id="verhaeltnis" class="eingabe">
+              <option value="16:9">16:9 — Breitbild</option>
+              <option value="9:16">9:16 — Hochformat</option>
+              <option value="1:1">1:1 — Quadrat</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+            </select>
+          </fieldset>
+          <fieldset class="feldgruppe">
+            <legend><label for="clipdauer">Sekunden je Szene</label></legend>
+            <select id="clipdauer" class="eingabe"></select>
+          </fieldset>
+          <fieldset class="feldgruppe">
+            <legend>Direkt mit erzeugen</legend>
+            <div class="haken-reihe" id="formatwahl"></div>
+            <p class="hinweis">Alles Übrige lässt sich später per Klick nachziehen.</p>
+          </fieldset>
+          <fieldset class="feldgruppe">
+            <label class="schalter">
+              <input type="checkbox" id="weich" checked>
+              <span class="schalter-spur"><span class="schalter-knauf"></span></span>
+              <span class="schalter-text">Weiche Übergänge
+                <em>Szenen ineinander blenden statt hart schneiden.</em></span>
+            </label>
+          </fieldset>
+        </details>
+      </div>
+
+      <div class="startleiste">
+        <button class="knopf knopf-haupt" id="btn-start" type="button">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-play"/></svg>
+          <span>Video erzeugen</span>
+        </button>
+        <button class="knopf knopf-abbruch" id="btn-abbruch" type="button" hidden>
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-stopp"/></svg>
+          <span>Abbrechen</span>
+        </button>
+        <p class="startzeile" id="startzeile">Bereit.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ Rechts: Ablauf, Logbuch, Videos ══════════════════════════════════ -->
+  <section class="spalte-rechts">
+
+    <div class="glas ablauf-glas">
+      <div class="glas-kopf">
+        <h2>Ablauf</h2>
+        <span class="glas-kopf-notiz" id="ablauf-notiz">Wartet auf Ihren Auftrag</span>
+      </div>
+      <div class="ablauf" id="ablauf"></div>
+    </div>
+
+    <div class="glas log-glas" id="log-glas">
+      <div class="glas-kopf">
+        <h2>Logbuch</h2>
+        <div class="glas-kopf-werkzeuge">
+          <select id="log-ebene" class="mini-wahl" aria-label="Ebene der Meldungen">
+            <option value="">Alles</option>
+            <option value="info" selected>Ab Info</option>
+            <option value="warnung">Ab Warnung</option>
+            <option value="fehler">Nur Fehler</option>
+          </select>
+          <button class="knopf knopf-mini" id="btn-log-kopieren" type="button"
+                  title="Logbuch in die Zwischenablage kopieren">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-kopieren"/></svg>
+          </button>
+          <button class="knopf knopf-mini klapp-knopf" id="btn-log-klappen" type="button"
+                  aria-expanded="true" title="Logbuch ein- und ausklappen">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-pfeil"/></svg>
+          </button>
+        </div>
+      </div>
+      <ol class="log" id="log" aria-live="polite" aria-relevant="additions"></ol>
+    </div>
+
+    <div class="glas biblio-glas">
+      <div class="glas-kopf">
+        <h2>Videos</h2>
+        <div class="glas-kopf-werkzeuge">
+          <span class="glas-kopf-notiz" id="biblio-notiz"></span>
+          <button class="knopf knopf-mini" id="btn-biblio-neu" type="button"
+                  title="Ordner neu einlesen">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-neu"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="biblio" id="biblio"></div>
+    </div>
+
+  </section>
+</main>
+
+<dialog class="schau" id="schau">
+  <div class="schau-kopf">
+    <h3 id="schau-titel">Video</h3>
+    <button class="knopf knopf-mini" id="btn-schau-zu" type="button" aria-label="Schließen">
+      <svg class="icon" viewBox="0 0 24 24"><use href="#i-schliessen"/></svg>
+    </button>
+  </div>
+  <video id="schau-video" controls playsinline preload="metadata"></video>
+  <div class="schau-fuss" id="schau-fuss"></div>
+</dialog>
+
+<div class="meldung" id="meldung" role="status" aria-live="polite" hidden></div>
+
+<script src="/static/js/kern.js"></script>
+<script src="/static/js/formular.js"></script>
+<script src="/static/js/ablauf.js"></script>
+<script src="/static/js/logbuch.js"></script>
+<script src="/static/js/bibliothek.js"></script>
+<script src="/static/js/start.js"></script>
+</body>
+</html>

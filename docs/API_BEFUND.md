@@ -1,0 +1,139 @@
+# API-Befund — live geprüft am 03.08.2026
+
+Alles hier Dokumentierte wurde mit echten Aufrufen ermittelt, nicht aus Dokumentation
+abgeschrieben. Grundlage für `app/higgsfield.py` und `app/llm/`.
+
+---
+
+## 1. Zugänge — Ist-Zustand
+
+| Zugang | Ergebnis | Bewertung |
+|---|---|---|
+| Higgsfield Platform-API-Key (`ID:SECRET`, aus jarvis2) | Auth **gültig** (`GET /v1/motions` → 200), Auftrag → **403 `not_enough_credits`** | Key funktioniert, Credit-Topf leer |
+| Higgsfield MCP/Abo (`mcp.higgsfield.ai`) | OAuth-Discovery **erreichbar**, alle Endpunkte vorhanden | Nutzbar nach einmaligem Browser-Login |
+| Anthropic API-Key (aus jarvis2, 108 Zeichen) | **400** – „credit balance is too low" | Key gültig, kein Guthaben |
+| Claude-CLI (`claude.cmd`, Abo) | **funktioniert** — `{"is_error":false,"result":"BEREIT"}` | Tragfähiger Hauptweg |
+| Ollama lokal | **läuft** — `qwen2.5:7b`, `qwen2.5:3b`, `qwen2.5-coder:7b/1.5b` | Offline-Rückfallebene sofort bereit |
+| ffmpeg | System `N-55702` **und** `imageio-ffmpeg` 7.1 | Doppelt abgesichert |
+| pywebview | 6.2.1 installiert | Desktop-Fenster möglich |
+
+> **Wichtig für die Übergabe:** Higgsfield trennt zwei getrennte Guthaben —
+> das Web-Abo (Soul/Plus auf higgsfield.ai, per Jahresabo bezahlt) und die
+> Platform-API-Credits (platform.higgsfield.ai). Ein Jahresabo füllt den API-Topf **nicht**.
+> Entweder API-Credits aufladen oder den MCP/Abo-Weg nutzen.
+
+---
+
+## 2. Higgsfield Platform-API — verifiziertes Verhalten
+
+**Basis:** `https://platform.higgsfield.ai`
+
+**Authentifizierung** (beide Varianten akzeptiert, `Bearer` wird mit 401 abgelehnt):
+```
+Authorization: Key <KEY_ID>:<KEY_SECRET>
+```
+```
+hf-api-key: <KEY_ID>
+hf-secret:  <KEY_SECRET>
+```
+
+**Ablauf:**
+```
+POST /{modell-pfad}          → 200 {"request_id": "...", "status": "queued", ...}
+GET  /requests/{id}/status   → {"status": "...", ...Medien-URLs bei completed}
+POST /requests/{id}/cancel   → 202, nur solange "queued"
+GET  /health                 → 204   (für Erreichbarkeitsprüfung)
+GET  /v1/motions             → 200   Liste der Kamerabewegungen mit UUID + Beschreibung
+```
+
+**Statuswerte:** `queued` · `in_progress` · `completed` · `failed` · `nsfw`
+(bei `failed` und `nsfw` werden Credits erstattet)
+
+**Fehlercodes, beobachtet:**
+
+| Code | Bedeutung |
+|---|---|
+| 400 | Schema-Verstoß beim JSON-Schema-Validator (z. B. `duration: 999 is not one of [5, 10]`) |
+| 403 | `not_enough_credits` — Auth in Ordnung, Guthaben leer |
+| 404 | `model_not_found` — Modellpfad existiert nicht |
+| 405 | Unbekannter GET-Pfad (jeder Pfad ist ein POST-Auftragsendpunkt, daher nie 404 bei GET) |
+| 422 | Pydantic-Validierung mit vollständiger Feldliste — sehr nützlich zur Schema-Erkundung |
+| 423 | `model_blocked` — Modell für diesen Zugang gesperrt (z. B. `reve/text-to-image`) |
+
+**Kein Endpunkt für den Credit-Stand.** Der Stand lässt sich nur indirekt ermitteln
+(403 bei Auftrag). Das Tool bildet das als Zustand „Guthaben erschöpft" ab.
+
+---
+
+## 3. Modellkatalog — geprüft, welche Pfade existieren
+
+### Bild aus Text
+| Pfad | Pflichtfelder | Optionen |
+|---|---|---|
+| `higgsfield-ai/soul/standard` | `prompt` | `aspect_ratio` = 9:16 · 16:9 · 4:3 · 3:4 · 1:1 · 2:3 · 3:2 · `resolution` = 720p · 1080p · `enhance_prompt` bool · `seed` ≥ 1 |
+| `higgsfield-ai/soul/turbo/{mode}` | `prompt` | zusätzlich `mode` im Pfad = `standard` · `reference` · `character` |
+| `higgsfield-ai/soul/lite/{mode}` | `prompt` | wie oben |
+| `reve/text-to-image` | — | **423 gesperrt** |
+
+### Video aus Bild
+| Pfad | Pflichtfelder | Dauer |
+|---|---|---|
+| `higgsfield-ai/dop/lite` · `/standard` · `/turbo` | `prompt`, `image_url` | `motions` = Liste von **Objekten** (IDs aus `/v1/motions`), `seed`, `enhance_prompt` |
+| `higgsfield-ai/dop/{stufe}/first-last-frame` | `prompt`, `image_url` | Start- und Endbild |
+| `kling-video/v2.1/pro` · `/master` · `/standard` `/image-to-video` | `prompt`, `image_url` | **5 oder 10 s** |
+| `kling-video/v2.6/pro/image-to-video` | `prompt`, `image_url` | **5 oder 10 s** — neueste Version |
+| `minimax/hailuo-02/pro/image-to-video` | `prompt`, `image_url` | **6 s** |
+
+### Video direkt aus Text
+| Pfad | Dauer |
+|---|---|
+| `minimax/hailuo-02/pro/text-to-video` | **6 s** |
+| `minimax/hailuo-02/standard/text-to-video` | **6 oder 10 s** |
+
+### Nicht vorhanden (404)
+`bytedance/seedance/*` · `google/veo3/*` · `kling-video/v2.5/*` · `kling-video/*/text-to-video` ·
+`wan/*` · `higgsfield-ai/text-to-video`
+
+> Der in jarvis2 verwendete Pfad `/v1/generations` mit `dop-lite` ist **veraltet** — daher
+> die damaligen 404. Wird nicht übernommen.
+
+**Folge für die Videolänge:** Ein Auftrag liefert maximal 10 s. Alles darüber entsteht
+zwingend durch Montage mehrerer Szenen — der Storyboard-Modus ist damit keine Spielerei,
+sondern technische Notwendigkeit.
+
+---
+
+## 4. Erkundungstechnik (für spätere Wartung)
+
+Das Schema eines Modells lässt sich **ohne Credit-Verbrauch** ermitteln:
+
+1. `POST /{modell}` mit leerem Body `{}` → 422 listet alle Pflichtfelder auf
+2. `POST` mit absichtlich ungültigen Werten (`duration: 999`, `aspect_ratio: "99:1"`) →
+   die Fehlermeldung nennt **alle erlaubten Werte**
+
+Beide Varianten erzeugen keinen Auftrag. So bleibt der Modellkatalog wartbar, wenn
+Higgsfield neue Modelle veröffentlicht.
+
+---
+
+## 5. Konsequenz für die Architektur
+
+Zwei Anbieterketten mit automatischem Durchreichen — jede Stufe wird beim Start geprüft
+und im Dashboard sichtbar gemacht:
+
+**Sprachmodell (Prompt-Schmiede)**
+```
+1. Claude-CLI (Abo)      ✓ funktioniert heute
+2. Anthropic API-Key     ⏳ greift automatisch, sobald Guthaben vorhanden
+3. Ollama lokal          ✓ läuft, offline, kostenlos
+```
+
+**Videoerzeugung**
+```
+1. Platform-API-Key      ⏳ eingebaut, greift sobald API-Credits vorhanden
+2. MCP/Abo-Login         ✓ Weg vorhanden, ein Browser-Klick nötig
+3. Probelauf-Modus       ✓ vollständige Kette ohne Credits (Demo/Test)
+```
+
+Kein Weg ist fest verdrahtet: Fällt eine Stufe aus, rückt die nächste nach, und die
+Oberfläche sagt in einem Satz, welcher Weg gerade aktiv ist und warum.
