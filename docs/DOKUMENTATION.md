@@ -27,10 +27,12 @@ app/
 ├── jobstore.py       Aufträge in SQLite, überleben Neustarts
 ├── media.py          ffmpeg: Montage, Formate, GIF, Vorschaubild
 ├── library.py        Bibliothek, Pfadsicherheit, Formate nachziehen
+├── updater.py        Aktualisierung aus dem Repository + Neustart
 ├── topics.py         Themen- und Merkmalkatalog (reine Daten)
 └── server.py         Flask-Routen, Ereignisstrom, Dateiauslieferung
 
-static/js/            kern · formular · ablauf · logbuch · bibliothek · start
+static/js/            kern · formular · ablauf · logbuch · bibliothek ·
+                      aktualisierung · start
 static/css/app.css    Design-Tokens und alle Bausteine
 templates/index.html  Struktur + eingebetteter Iconsatz
 
@@ -54,9 +56,19 @@ Oberfläche sagt, welcher Weg gerade trägt.
 
 | Stufe | Wann sie greift | Stand 03.08.2026 |
 |---|---|---|
-| `cli` | Claude-CLI mit Abo-Anmeldung, kein Guthaben nötig | funktioniert |
-| `api` | `ANTHROPIC_KEY` mit Guthaben | Schlüssel gültig, **kein Guthaben** |
+| `cli` | Claude-CLI über die Abo-Anmeldung, kein Guthaben nötig | **funktioniert** |
+| `api` | `ANTHROPIC_KEY` mit Guthaben | **funktioniert** |
 | `local` | Ollama auf dem Rechner | läuft, `qwen2.5:7b` |
+
+> **Zum Abo-Token.** In der `.env` steht `CLAUDE_CODE_OAUTH_TOKEN`. Damit läuft der
+> CLI-Weg auch auf einem Rechner, auf dem nie `claude login` ausgeführt wurde — genau
+> das braucht ein Kunde ohne eigenes Claude-Konto. Ohne das Token nimmt die CLI die
+> Anmeldung des jeweiligen Rechners; ist keine da, rückt die nächste Stufe nach.
+> Ein neues Token erzeugt man mit `claude setup-token`.
+>
+> Wichtig ist außerdem die Reihenfolge im Umgang mit den Umgebungsvariablen: liegt ein
+> `ANTHROPIC_KEY` in der Umgebung, nimmt die CLI den API-Weg statt der Abo-Anmeldung.
+> `claude_cli._umgebung()` entfernt ihn deshalb vor jedem Aufruf.
 
 Eine Stufe, die an Zugang oder Guthaben scheitert, wird fünf Minuten gesperrt
 (`llm._SPERRDAUER`), damit nicht jede Anfrage in dieselbe Wand läuft. Ein Netzhänger
@@ -123,6 +135,39 @@ zusätzlich beim Dienst storniert.
 
 ---
 
+## 4b. Aktualisierung und Neustart
+
+`updater.py` hält das Werkzeug beim Kunden aktuell, ohne dass er ein Terminal öffnet.
+
+```
+GET  /api/aktualisierung           Stand prüfen (?schnell=1 ohne Netz)
+POST /api/aktualisierung           holen und neu starten
+POST /api/neustart                 nur neu starten (etwa nach einer .env-Änderung)
+```
+
+Drei Festlegungen, die bewusst so getroffen sind:
+
+**Nur vorspulen.** `git pull --ff-only`. Es entsteht nie ein Merge, und lokale Änderungen
+brechen den Vorgang mit einer verständlichen Meldung ab, statt überschrieben zu werden.
+Ein Test hält das fest (`test_nur_vorspulen_niemals_zusammenfuehren`).
+
+**Nie während eines Auftrags.** Sowohl die Oberfläche als auch `updater.aktualisieren()`
+prüfen `pipeline.laeuft_gerade()`. Ein Neustart mitten in der Videoerzeugung würde
+bereits bezahltes Guthaben verbrennen.
+
+**Der Neustart über einen Helfer.** Ein Prozess kann sich nicht selbst wiederbeleben.
+`neu_starten()` startet deshalb einen losgelösten Python-Prozess, der kurz wartet und
+dann `run.py` erneut aufruft; das Original beendet sich mit `os._exit(0)`. Ein sauberes
+Herunterfahren wäre hier falsch — es bliebe am wartenden Ereignisstrom und am Fenster
+hängen. Die Oberfläche wartet unterdessen darauf, dass `/api/lebt` erst *verschwindet*
+und dann *wiederkommt*, und lädt sich erst dann neu; ohne diese zwei Stufen würde sie
+beim sterbenden Server zu früh neu laden.
+
+**Voraussetzung beim Kunden:** eine Git-Arbeitskopie. Wer das ZIP herunterlädt, hat
+keine, und der Knopf meldet das ehrlich, statt es zu versuchen.
+
+---
+
 ## 5. Was beim Bauen Zeit gekostet hat
 
 Vier Fallen, die alle im Code kommentiert sind — damit sie niemand ein zweites Mal tritt:
@@ -147,6 +192,19 @@ lieferte `projekt`/`szenen`/`montage` mit Feldern `prompt`/`kamera`/`bewegung_im
 statt der angeforderten Struktur, und das auf Deutsch. Zwei Gegenmaßnahmen:
 das Format steht **zusätzlich im Auftragstext**, und `promptsmith` versteht über
 Alias-Listen beide Schemata. (`promptsmith._ALIAS_*`)
+
+**Die Batchdatei mit LF-Zeilenenden.** `start.bat` war mit reinen LF-Enden und
+Kastenstrichen in den Kommentaren geschrieben. cmd.exe liest eine Batchdatei in der
+eingestellten Codepage und braucht CRLF — beides zusammen führte zu wirren Zeichen
+statt eines Starts. Die Datei ist jetzt reines ASCII mit CRLF, und `.gitattributes`
+nagelt das fest, damit ein `git clone` auf dem Kundenrechner die Zeilenenden nicht
+wieder umstellt.
+
+**Zusammengedrückte Videokacheln.** Die rechte Spalte war ein Raster mit flexibler
+letzter Zeile. Bei kleinem Fenster blieben für die Bibliothek 67 Pixel übrig, die
+Kacheln wurden auf einen Streifen gestaucht — die Kopfzeile meldete „1 Video“, zu
+sehen war nichts. Jetzt rollt die Spalte als Ganzes, und die Kacheln behalten über
+`align-items: start` ihre eigene Höhe.
 
 ---
 

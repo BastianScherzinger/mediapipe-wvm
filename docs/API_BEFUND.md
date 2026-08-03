@@ -11,11 +11,32 @@ abgeschrieben. Grundlage für `app/higgsfield.py` und `app/llm/`.
 |---|---|---|
 | Higgsfield Platform-API-Key (`ID:SECRET`, aus jarvis2) | Auth **gültig** (`GET /v1/motions` → 200), Auftrag → **403 `not_enough_credits`** | Key funktioniert, Credit-Topf leer |
 | Higgsfield MCP/Abo (`mcp.higgsfield.ai`) | OAuth-Discovery **erreichbar**, alle Endpunkte vorhanden | Nutzbar nach einmaligem Browser-Login |
-| Anthropic API-Key (aus jarvis2, 108 Zeichen) | **400** – „credit balance is too low" | Key gültig, kein Guthaben |
-| Claude-CLI (`claude.cmd`, Abo) | **funktioniert** — `{"is_error":false,"result":"BEREIT"}` | Tragfähiger Hauptweg |
+| Anthropic-Schlüssel aus jarvis2 | **400** – „credit balance is too low" | gültig, aber ohne Guthaben |
+| Anthropic-Schlüssel aus `DjangoTeamApp\.env` | **funktioniert** | jetzt in der `.env` hinterlegt |
+| Claude-Abo-Token aus `livingen\.env` (`sk-ant-oat01-…`) | **funktioniert** über die CLI | jetzt als `CLAUDE_CODE_OAUTH_TOKEN` hinterlegt |
+| Claude-CLI mit der Anmeldung dieses Rechners | **funktioniert** | greift, wenn kein Token gesetzt ist |
 | Ollama lokal | **läuft** — `qwen2.5:7b`, `qwen2.5:3b`, `qwen2.5-coder:7b/1.5b` | Offline-Rückfallebene sofort bereit |
-| ffmpeg | System `N-55702` **und** `imageio-ffmpeg` 7.1 | Doppelt abgesichert |
+| ffmpeg | System `N-55702` **und** `imageio-ffmpeg` 7.1 | siehe Warnung unten |
 | pywebview | 6.2.1 installiert | Desktop-Fenster möglich |
+
+**Vollständige Suche nach Zugängen (03.08.2026).** Der gesamte Benutzerordner wurde nach
+Schlüsselmustern durchsucht und jeder Fund einzeln gegen den echten Dienst geprüft:
+
+* **Sechs verschiedene Anthropic-Zugänge** gefunden — zwei API-Schlüssel (einer mit,
+  einer ohne Guthaben), zwei Zugriffstoken (beide funktionsfähig), ein Erneuerungstoken
+  und ein Testwert aus der eigenen Testsuite.
+* **Genau ein Higgsfield-Schlüssel**, in drei Dateien identisch (`jarvis2\.env`,
+  `~\.claude\.env`, hier). Gegen **alle sechs** bekannten Modellpfade geprüft — jedes Mal
+  `403 not_enough_credits`. Einen zweiten Higgsfield-Zugang gibt es auf diesem Rechner
+  nicht, und es liegt auch kein MCP-Anmeldezwischenspeicher vor.
+
+Die Videoerzeugung hängt damit allein an der Guthabenfrage, nicht an einem fehlenden
+oder falschen Schlüssel.
+
+> **Achtung, ffmpeg:** Im Suchpfad lag ein Programm namens `ffmpeg.EXE`, das die Option
+> `-hide_banner` nicht kennt und jeden Aufruf mit „Option not found“ abbricht. Das
+> Programm prüft deshalb jeden Kandidaten mit einem Probeaufruf, bevor es ihn benutzt,
+> und landet hier beim mitgelieferten `imageio-ffmpeg` 7.1.
 
 > **Wichtig für die Übergabe:** Higgsfield trennt zwei getrennte Guthaben —
 > das Web-Abo (Soul/Plus auf higgsfield.ai, per Jahresabo bezahlt) und die

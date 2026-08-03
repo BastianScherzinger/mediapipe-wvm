@@ -757,11 +757,14 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
    gespart wird und die Blöcke selbst lesbar bleiben. */
 .verbindung {
   position: relative;
+  /* Ohne Außenabstand und mit kleiner Mindestbreite: die Verbindungen geben als Erste
+     nach, wenn es eng wird. Vorher blieben durch die Ränder ein paar Pixel Überhang
+     übrig — sichtbar wurde das zwar nicht, aber die Blöcke standen dann nicht mehr
+     mittig unter ihrem Rahmen. */
   flex: 0 1 40px;
-  min-width: 14px;
+  min-width: 8px;
   align-self: center;
   height: 2px;
-  margin: 0 2px;
   background: rgba(255,255,255,.1);
   border-radius: 2px;
   overflow: visible;

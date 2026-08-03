@@ -14,14 +14,17 @@ quadratisch für den Feed, Breitbild für YouTube.
 **1. Herunterladen**
 
 ```
-git clone <REPOSITORY-ADRESSE>
-cd MEDIAPIPEWVM
+git clone https://github.com/BastianScherzinger/mediapipe-wvm.git
+cd mediapipe-wvm
 ```
+
+> Bitte wirklich `git clone` verwenden und nicht das ZIP herunterladen — nur so
+> funktioniert später der Aktualisierungsknopf im Programm.
 
 **2. Zugangsdaten einlegen**
 
 Die Datei `.env` wird Ihnen getrennt zugeschickt. Legen Sie sie unverändert in den
-Ordner `MEDIAPIPEWVM`. Sie enthält die Schlüssel für Higgsfield und Claude und gehört
+Ordner `mediapipe-wvm`. Sie enthält die Schlüssel für Higgsfield und Claude und gehört
 aus gutem Grund nicht ins Repository.
 
 **3. Starten**
@@ -34,6 +37,27 @@ Sekunden.
 
 > Voraussetzung: Python 3.10 oder neuer, mit angekreuztem „Add Python to PATH“.
 > Alles Weitere bringt das Programm selbst mit, auch ffmpeg.
+
+---
+
+## Aktualisieren
+
+Oben rechts sitzt ein Knopf, der den Stand des Programms zeigt:
+
+| Farbe | Bedeutung |
+|---|---|
+| **grün** „Aktuell“ | Es liegt nichts Neues vor. Ein Klick sieht trotzdem nach. |
+| **gelb** „Aktualisierung (3)“ | Drei Änderungen liegen bereit. Ein Klick holt sie. |
+| grau „Version ?“ | Der Stand ließ sich nicht abfragen — meist fehlt die Internetverbindung. |
+
+Ein Klick auf den gelben Knopf holt den neuen Stand, zieht geänderte Pakete nach und
+startet das Programm neu. Der Vorgang dauert etwa eine halbe Minute; die Ansicht
+frischt sich danach von selbst auf.
+
+**Was dabei sicher ist:** Ihre `.env`, alle fertigen Videos und alle Einstellungen
+bleiben unangetastet — sie liegen außerhalb dessen, was aktualisiert wird. Es wird
+ausschließlich vorgespult, nie etwas überschrieben. Solange ein Video erzeugt wird, ist
+der Knopf gesperrt: ein Neustart mittendrin würde Guthaben verbrennen.
 
 ---
 
