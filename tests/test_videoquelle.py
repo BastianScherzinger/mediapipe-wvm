@@ -313,15 +313,20 @@ def mit_modellliste(monkeypatch):
 
 
 def test_kein_platformname_verlaesst_je_den_abo_weg(ohne_modellliste):
-    """Alles mit Schrägstrich ist ein Platform-Pfad und würde sicher abgewiesen."""
-    for wunsch, art in (("higgsfield-ai/soul/standard", "bild"),
-                        ("higgsfield-ai/soul/turbo/standard", "bild"),
-                        ("kling-video/v2.6/pro/image-to-video", "video"),
-                        ("kling-video/v2.1/master/image-to-video", "video"),
-                        ("higgsfield-ai/dop/turbo", "video"),
-                        ("minimax/hailuo-02/standard/text-to-video", "video"),
-                        ("etwas/voellig/unbekanntes", "video"),
-                        ("", "bild")):
+    """Alles mit Schrägstrich ist ein Platform-Pfad und würde sicher abgewiesen.
+
+    Geprüft wird über die echten Modellisten der Oberfläche, nicht über eine Abschrift
+    davon: Wer ein Modell hinzufügt und die Übersetzung vergisst, soll es hier merken
+    und nicht erst beim Kunden.
+    """
+    kandidaten = ([(m["id"], "video") for m in higgsfield.VIDEOMODELLE] +
+                  [(m["id"], "bild") for m in higgsfield.BILDMODELLE] +
+                  [(config.VIDEO_MODEL, "video"), (config.IMAGE_MODEL, "bild"),
+                   (config.T2V_MODEL, "video"),
+                   ("etwas/voellig/unbekanntes", "video"), ("", "bild")])
+    assert len(kandidaten) >= 10                 # sonst prüft die Schleife nichts
+
+    for wunsch, art in kandidaten:
         aufgeloest = higgsfield_mcp.modell_aufloesen(wunsch, art)
         assert aufgeloest, f"{wunsch} ergab nichts"
         assert "/" not in aufgeloest, f"{wunsch} wurde zu {aufgeloest}"

@@ -23,7 +23,8 @@ app/
 ├── errors.py         Fehlerklassen mit Meldung UND Handlungshinweis
 ├── logbook.py        Logbuch + Ereignisverteilung (ein Kanal für beides)
 ├── higgsfield.py     Platform-API: Bild, Video, Polling, Restzeit, Abbruch
-├── higgsfield_mcp.py Abo-Weg über MCP: OAuth-Anmeldung, Bild, Video
+├── higgsfield_mcp.py Abo-Weg über MCP: OAuth-Anmeldung, Bild, Video,
+│                     Übersetzung der Modellnamen (Platform ≠ MCP)
 ├── videoquelle.py    Wählt zwischen Platform, Abo und Probelauf
 ├── promptsmith.py    Briefing → Drehbuch (der eigentliche Mehrwert)
 ├── llm/              Sprachmodell-Kette: CLI → API → Ollama
@@ -46,7 +47,7 @@ templates/index.html  Struktur + eingebetteter Iconsatz
 data/                 auftraege.db, laufzeiten.json, guthabenstand.json,
                       higgsfield_abo.json
 output/               ein Ordner je Video
-tests/                212 Tests
+tests/                229 Tests
 ```
 
 **Abhängigkeitsrichtung:** `server → pipeline → {promptsmith, higgsfield, media, library,
@@ -287,7 +288,7 @@ Zahl.
 
 ## 5. Was beim Bauen Zeit gekostet hat
 
-Vier Fallen, die alle im Code kommentiert sind — damit sie niemand ein zweites Mal tritt:
+Acht Fallen, die alle im Code kommentiert sind — damit sie niemand ein zweites Mal tritt:
 
 **`Connection: keep-alive` im Ereignisstrom.** Nach PEP 3333 ein verbotener
 Verbindungs-Header. Waitress bricht die Anfrage mit `AssertionError` ab — und damit fiel
@@ -322,6 +323,18 @@ letzter Zeile. Bei kleinem Fenster blieben für die Bibliothek 67 Pixel übrig, 
 Kacheln wurden auf einen Streifen gestaucht — die Kopfzeile meldete „1 Video“, zu
 sehen war nichts. Jetzt rollt die Spalte als Ganzes, und die Kacheln behalten über
 `align-items: start` ihre eigene Höhe.
+
+**Ein Test, der die Annahme mitmacht, die er prüfen sollte.** Der Abo-Weg war getestet —
+aber nur gegen eine Attrappe, und die hat jeden Modellnamen angenommen. Der echte Dienst
+kennt die Platform-Pfade nicht; der erste Lauf beim Kunden brach genau daran ab. Das ist
+die teuerste der Fallen hier, weil sie sich hinter grünen Tests versteckt hat.
+(`higgsfield_mcp.modell_aufloesen`, → [`BEFUND_2026-08-26.md`](BEFUND_2026-08-26.md))
+
+**Der `═`-Balken gegen cp1252.** Geht `stdout` nicht an ein Terminal, nimmt Windows die
+ANSI-Codepage — und schon die erste Zeile des Startberichts löst einen
+`UnicodeEncodeError` aus. Das Programm startet dann **gar nicht**. `start.bat` setzt
+`PYTHONIOENCODING` und verdeckte das; `run.py` stellt jetzt selbst um und verlässt sich
+nicht mehr auf die Umgebung. (`run.py:voraussetzungen_melden`)
 
 ---
 
@@ -388,10 +401,41 @@ Gruppe zu einer Entweder-oder-Wahl.
 **Neues Ausgabeformat** — Eintrag in `media.FORMATE` mit `kurz`-Kürzel für die Kachel.
 Oberfläche und Bibliothek nehmen es automatisch auf.
 
-**Neues Videomodell** — erst mit der Sonde aus Abschnitt 3 prüfen, dann in
-`higgsfield.VIDEOMODELLE` und `ERLAUBTE_DAUER` eintragen.
+**Neues Videomodell** — drei Schritte, der dritte wird gern vergessen:
 
-**Anderer Videoanbieter** — eine Klasse mit denselben vier Methoden wie
-`Higgsfield` (`bild`, `video_aus_bild`, `video_aus_text`, `herunterladen`) genügt; die
-Pipeline spricht nur über diese Schnittstelle. Der Ende-zu-Ende-Test zeigt an seiner
-Attrappe, wie wenig dafür nötig ist.
+1. Mit der Sonde aus Abschnitt 3 prüfen (kostet kein Guthaben).
+2. In `higgsfield.VIDEOMODELLE` und `ERLAUBTE_DAUER` eintragen.
+3. **In `higgsfield_mcp._UEBERSETZUNG` eintragen.** Ohne diesen Schritt funktioniert das
+   Modell über die Platform-API, aber nicht über das Abo — dort heißt es anders. Die
+   Laufzeitabfrage fängt das zwar ab, aber erst nach einem Fehlversuch.
+
+**Anderer Videoanbieter** — eine Klasse mit denselben Methoden wie `Higgsfield`
+(`bild`, `video_aus_bild`, `video_aus_text`, `herunterladen`, `abbrechen`, `selbsttest`)
+genügt; die Pipeline spricht nur über diese Schnittstelle. Der Ende-zu-Ende-Test zeigt
+an seiner Attrappe, wie wenig dafür nötig ist.
+
+Zwei Tests halten die Schnittstelle zusammen, und beide sind aus Schaden entstanden:
+`test_abo_kann_alles_was_die_pipeline_braucht` (fehlt eine Methode, fliegt es sonst erst
+mitten im Auftrag auf) und `test_alle_videowege_nehmen_dasselbe_seitenverhaeltnis_entgegen`
+(dasselbe für die Parameter). Wer einen Weg hinzufügt, erweitert beide.
+
+---
+
+## 9. Wenn beim Kunden etwas klemmt
+
+Die Reihenfolge, in der sich am schnellsten klären lässt, woran es liegt:
+
+1. **Logbuch lesen — es nennt seit dem 26.08.2026 den Grund, nicht nur den Umstand.**
+   Besonders die Zeilen der Quellen `Videoquelle`, `Sprachmodell` und `Higgsfield (Abo)`.
+2. **Welcher Videoweg läuft gerade?** Die Zeile `Videoerzeugung läuft über: …` steht
+   direkt nach dem Start. `Probelauf (ohne Guthaben)` heißt: die Clips sind Platzhalter.
+3. **Steht `Modell „…“ ist dem Abo-Dienst unbekannt`?** Dann hat sich die Benennung bei
+   Higgsfield geändert. Der genannte Ersatzname gehört in `_UEBERSETZUNG`.
+4. **Schrieb ein Sprachmodell das Drehbuch?** Die Erfolgszeile nennt den Weg
+   (`Claude (Abo)`, `Claude (API)`, `Lokal (…)`). Steht dort stattdessen
+   `einfaches Drehbuch wird selbst erstellt`, war keiner erreichbar — die Videoqualität
+   leidet dann sichtbar, und die Zeilen darüber sagen, warum.
+5. **Der Knopf „Prüfen"** geht alle Zugänge durch, ohne Guthaben zu verbrauchen.
+6. **`POST /api/guthaben-pruefen`** ist der einzige verlässliche Weg zum Kontostand der
+   Platform-API — er schickt einen schemakorrekten Auftrag und storniert ihn sofort.
+   Deshalb nur auf Knopfdruck, nie automatisch.

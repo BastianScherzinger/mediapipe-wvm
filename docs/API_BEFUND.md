@@ -3,6 +3,18 @@
 Alles hier Dokumentierte wurde mit echten Aufrufen ermittelt, nicht aus Dokumentation
 abgeschrieben. Grundlage für `app/higgsfield.py` und `app/llm/`.
 
+> **Achtung, das kostete am 26.08.2026 einen Kundenlauf:** Sämtliche Modellpfade in
+> Abschnitt 3 gelten **ausschließlich für die Platform-API** (`platform.higgsfield.ai`).
+> Der MCP-Dienst des Web-Abos (`mcp.higgsfield.ai`) kennt sie **nicht** — er führt kurze
+> Kennungen ohne Schrägstrich und antwortet auf einen Platform-Pfad mit `unknown model`.
+> `higgsfield_mcp.modell_aufloesen()` übersetzt deshalb, bevor etwas hinausgeht.
+> Einzelheiten: [`BEFUND_2026-08-26.md`](BEFUND_2026-08-26.md).
+>
+> Die MCP-Kennungen ließen sich hier **nicht** nachmessen: `mcp.higgsfield.ai`
+> beantwortet ohne Anmeldung jede Anfrage mit `401`, auch `tools/list`. Sie sind das
+> einzige in diesem Projekt, das nicht live geprüft ist — abgesichert wird das durch
+> eine Laufzeitabfrage (`models_explore`), nicht durch eine Annahme.
+
 ---
 
 ## 1. Zugänge — Ist-Zustand
@@ -87,6 +99,8 @@ GET  /v1/motions             → 200   Liste der Kamerabewegungen mit UUID + Bes
 ---
 
 ## 3. Modellkatalog — geprüft, welche Pfade existieren
+
+**Gilt für die Platform-API.** Für den Abo-Weg siehe den Kasten ganz oben.
 
 ### Bild aus Text
 | Pfad | Pflichtfelder | Optionen |

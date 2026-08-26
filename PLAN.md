@@ -1,5 +1,10 @@
 # MEDIAPIPE WVM — KI-Video-Studio
-### Implementierungsplan · Stand 03.08.2026
+### Implementierungsplan · aufgestellt 03.08.2026 · fortgeschrieben 26.08.2026
+
+Die Abschnitte 1 bis 5 sind der ursprüngliche Plan und bleiben unverändert stehen — sie
+zeigen, was vorher entschieden wurde. Was danach dazukam, steht in Abschnitt 6 unter
+„Danach hinzugekommen“; der jüngste Befund in
+[`docs/BEFUND_2026-08-26.md`](docs/BEFUND_2026-08-26.md).
 
 ---
 
@@ -141,7 +146,7 @@ Der Fortschritt steht in der Aufgabenliste dieser Sitzung.
 
 | # | Paket | Fertig, wenn | Stand |
 |---|---|---|---|
-| P13 | Echter Medien-Durchlauf | Ein Film aus echtem Higgsfield-Material liegt vor, Laufzeitschätzungen sind daran geeicht | **offen** — wartet auf Guthaben |
+| P13 | Echter Medien-Durchlauf | Ein Film aus echtem Higgsfield-Material liegt vor, Laufzeitschätzungen sind daran geeicht | **offen** — der erste Versuch beim Kunden brach an P21 ab |
 | P14 | Videobereich | Kacheln sichtbar und anklickbar, der ganze Bereich rollt | fertig |
 | P15 | Glas und Ablauf | LED-Rand an den Glasboxen, Blöcke ohne Querlauf | fertig |
 | P16 | Update-Knopf | Neuer Stand und Neustart per Klick, gesperrt während eines Auftrags | fertig |
@@ -149,6 +154,23 @@ Der Fortschritt steht in der Aufgabenliste dieser Sitzung.
 | P18 | Abschlussdokumentation | README, technische Doku und API-Befund auf dem Stand des Codes | fertig |
 | P19 | Abo-Weg über MCP | Higgsfield-Abo per Knopfdruck verbunden, Videos laufen über dessen Credits | fertig |
 | P20 | Kopfzeile | Jede Beschriftung ohne Erklärung verständlich, Ampel springt nicht um | fertig |
+| P21 | Abo-Weg beim Kunden | Modellnamen werden übersetzt statt durchgereicht, Fehler des MCP-Dienstes kommen im Klartext an, das Update braucht keine Änderung an der `.env` | fertig, 26.08.2026 |
+| P22 | Zugänge des Kunden | `ANTHROPIC_KEY` und `HIGGSFIELD_API_KEY` gehören dem Kunden, ein Sprachmodell ist auf seinem Rechner erreichbar | **offen** — siehe unten |
+
+**P21** entstand aus dem ersten echten Lauf beim Kunden. Ursache, Behebung und
+Prüfprotokoll stehen vollständig in
+[`docs/BEFUND_2026-08-26.md`](docs/BEFUND_2026-08-26.md).
+
+**P22 ist der einzige Punkt, den kein Update lösen kann** — er verlangt Handlungen an
+den Konten, nicht am Code:
+
+1. Beide Schlüssel in der `.env` durch die des Kunden ersetzen. Bis dahin geht jeder
+   Aufruf auf die Rechnung des Entwicklers.
+2. Einen Weg zu einem Sprachmodell herstellen. Am einfachsten `claude login` im Terminal
+   des Kunden — das nutzt sein Claude-Abo und kostet nichts extra. Sonst: eigenes
+   Anthropic-Guthaben, ein frisches `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`),
+   oder Ollama. Ohne einen davon entsteht das Drehbuch aus dem Notbehelf, und die
+   Videoqualität leidet sichtbar.
 
 ---
 
@@ -173,3 +195,9 @@ Der Fortschritt steht in der Aufgabenliste dieser Sitzung.
 
 Ein Git-Repository ohne Zugangsdaten, eine separat übergebene `.env`, eine README, die in
 drei Schritten zur laufenden App führt, und ein Werkzeug, das mit einem Doppelklick startet.
+
+**Und einen Update-Knopf, der ohne Terminal auskommt.** Am 26.08.2026 an einem echten
+Klon geprüft: `.env`, die Higgsfield-Abo-Anmeldung (`data/higgsfield_abo.json`) und alle
+fertigen Videos sind danach unverändert — Byte für Byte —, die Arbeitskopie bleibt
+sauber, und die neue Fassung startet. Der Kunde drückt **Update**, bestätigt, und wartet,
+bis sich das Fenster selbst auffrischt. Mehr nicht.
