@@ -61,6 +61,7 @@ class Probelauf:
     def video_aus_bild(self, prompt: str, bild_url: str, *, dauer: int = 5,
                        modell: str = "", saat: int | None = None,
                        bewegungen: list[str] | None = None,
+                       seitenverhaeltnis: str = "16:9",
                        abbruch: threading.Event | None = None,
                        melden=None) -> higgsfield.Ergebnis:
         ziel = config.DATA_DIR / "probelauf" / f"clip_{int(time.time() * 1000)}.mp4"
@@ -71,6 +72,7 @@ class Probelauf:
         return higgsfield.Ergebnis("probe-video", "probelauf", str(ziel), float(dauer), {})
 
     def video_aus_text(self, prompt: str, *, dauer: int = 6, modell: str = "",
+                       seitenverhaeltnis: str = "16:9",
                        abbruch: threading.Event | None = None,
                        melden=None) -> higgsfield.Ergebnis:
         return self.video_aus_bild(prompt, "", dauer=dauer, abbruch=abbruch, melden=melden)

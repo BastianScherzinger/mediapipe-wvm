@@ -65,12 +65,19 @@ def freier_port(wunsch: int, versuche: int = 20) -> int:
 
 def voraussetzungen_melden() -> bool:
     """Zeigt den Startbericht im Terminal. Gibt zurück, ob alles Wesentliche steht."""
-    # Ohne Zeilenpufferung bleibt der Bericht unsichtbar, sobald die Ausgabe nicht
-    # direkt an ein Terminal geht (Startskript, Aufruf aus einem anderen Programm).
-    try:
-        sys.stdout.reconfigure(line_buffering=True)
-    except Exception:
-        pass
+    # Zwei Dinge auf einmal:
+    #  * Ohne Zeilenpufferung bleibt der Bericht unsichtbar, sobald die Ausgabe nicht
+    #    direkt an ein Terminal geht (Startskript, Aufruf aus einem anderen Programm).
+    #  * Ohne UTF-8 stürzt der Start ab, sobald die Ausgabe in eine Datei geht: Windows
+    #    nimmt dann cp1252, und schon das erste „═“ des Balkens löst einen
+    #    UnicodeEncodeError aus — das Programm startet gar nicht erst. `start.bat` setzt
+    #    PYTHONIOENCODING, aber darauf darf sich `run.py` nicht verlassen; es wird auch
+    #    direkt aufgerufen, und der Neustart nach einer Aktualisierung tut es ebenfalls.
+    for strom in (sys.stdout, sys.stderr):
+        try:
+            strom.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+        except Exception:
+            pass
 
     # Derselbe Bericht wie im Fenster — sonst sagt das Terminal „ok“, während die Lampe
     # im Dashboard auf Gelb steht. Deshalb `videoquelle.startbericht()` statt

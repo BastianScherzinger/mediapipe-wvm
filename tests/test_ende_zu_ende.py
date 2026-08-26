@@ -67,7 +67,8 @@ class AttrappeHiggsfield:
                                    str(pfad), 1.0, {})
 
     def video_aus_bild(self, prompt, bild_url, *, dauer=5, modell="", saat=None,
-                       bewegungen=None, abbruch=None, melden=None):
+                       bewegungen=None, seitenverhaeltnis="16:9",
+                       abbruch=None, melden=None):
         if abbruch is not None and abbruch.is_set():
             raise errors.AbbruchFehler("Abgebrochen.")
         self.videos += 1
@@ -83,8 +84,10 @@ class AttrappeHiggsfield:
         return higgsfield.Ergebnis(f"video-{self.videos}", modell or "attrappe",
                                    str(pfad), 2.0, {})
 
-    def video_aus_text(self, prompt, *, dauer=6, modell="", abbruch=None, melden=None):
+    def video_aus_text(self, prompt, *, dauer=6, modell="", seitenverhaeltnis="16:9",
+                       abbruch=None, melden=None):
         return self.video_aus_bild(prompt, "", dauer=dauer, modell=modell,
+                                   seitenverhaeltnis=seitenverhaeltnis,
                                    abbruch=abbruch, melden=melden)
 
     def herunterladen(self, url, ziel, abbruch=None, melden=None):

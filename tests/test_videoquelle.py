@@ -281,3 +281,207 @@ def test_abo_kann_alles_was_die_pipeline_braucht():
         assert callable(getattr(higgsfield_mcp.client, name)), f"{name} fehlt"
         assert callable(getattr(higgsfield.client, name)), f"{name} fehlt"
         assert callable(getattr(videoquelle.probelauf, name)), f"{name} fehlt"
+
+
+# ── Modellnamen des Abo-Wegs ─────────────────────────────────────────────────
+#
+# Der Fehler, an dem die Übergabe am 26.08.2026 gescheitert ist, stand so im
+# Logbuch des Kunden:
+#
+#     Higgsfield hat keine Auftragsnummer zurückgegeben.
+#     {'error': 'unknown model "higgsfield-ai/soul/standard"...'}
+#
+# Ursache: Die Ablaufsteuerung reicht den Modellnamen aus der .env durch, und der
+# ist ein Pfad der Platform-API. Der MCP-Dienst des Abos kennt nur kurze
+# Kennungen. Diese Tests halten die Übersetzung in beide Richtungen fest.
+
+@pytest.fixture
+def ohne_modellliste(monkeypatch):
+    """Der Dienst antwortet nicht — dann muss die Übersetzungstabelle tragen."""
+    monkeypatch.setattr(higgsfield_mcp, "_MODELLE", {"zeit": 0.0, "liste": []})
+    monkeypatch.setattr(higgsfield_mcp, "modellliste", lambda erneuern=False: [])
+
+
+@pytest.fixture
+def mit_modellliste(monkeypatch):
+    liste = [{"id": "soul_2", "name": "Soul 2", "art": "image"},
+             {"id": "soul_2_turbo", "name": "Soul 2 Turbo", "art": "image"},
+             {"id": "kling2_6_pro", "name": "Kling 2.6 Pro", "art": "video"},
+             {"id": "hailuo_02_standard", "name": "Hailuo 02", "art": "video"}]
+    monkeypatch.setattr(higgsfield_mcp, "modellliste", lambda erneuern=False: list(liste))
+    return liste
+
+
+def test_kein_platformname_verlaesst_je_den_abo_weg(ohne_modellliste):
+    """Alles mit Schrägstrich ist ein Platform-Pfad und würde sicher abgewiesen."""
+    for wunsch, art in (("higgsfield-ai/soul/standard", "bild"),
+                        ("higgsfield-ai/soul/turbo/standard", "bild"),
+                        ("kling-video/v2.6/pro/image-to-video", "video"),
+                        ("kling-video/v2.1/master/image-to-video", "video"),
+                        ("higgsfield-ai/dop/turbo", "video"),
+                        ("minimax/hailuo-02/standard/text-to-video", "video"),
+                        ("etwas/voellig/unbekanntes", "video"),
+                        ("", "bild")):
+        aufgeloest = higgsfield_mcp.modell_aufloesen(wunsch, art)
+        assert aufgeloest, f"{wunsch} ergab nichts"
+        assert "/" not in aufgeloest, f"{wunsch} wurde zu {aufgeloest}"
+
+
+def test_liste_des_dienstes_schlaegt_die_tabelle(mit_modellliste):
+    assert higgsfield_mcp.modell_aufloesen("higgsfield-ai/soul/standard",
+                                           "bild") == "soul_2"
+    assert higgsfield_mcp.modell_aufloesen("kling-video/v2.6/pro/image-to-video",
+                                           "video") == "kling2_6_pro"
+
+
+def test_bekannter_name_bleibt_unangetastet(mit_modellliste):
+    assert higgsfield_mcp.modell_aufloesen("hailuo_02_standard",
+                                           "video") == "hailuo_02_standard"
+
+
+def test_unbekannter_wunsch_landet_bei_der_richtigen_art(mit_modellliste):
+    """Kennt der Dienst nichts Ähnliches, muss wenigstens die Art stimmen — ein
+    Bildmodell für einen Videoauftrag wäre nur ein anderer Fehler."""
+    video = higgsfield_mcp.modell_aufloesen("voellig/anderes/modell", "video")
+    assert video in ("kling2_6_pro", "hailuo_02_standard")
+
+
+def test_fehlertext_findet_die_meldung_des_dienstes():
+    assert "unknown model" in higgsfield_mcp._fehlertext(
+        {"error": 'unknown model "higgsfield-ai/soul/standard".'})
+    assert higgsfield_mcp._fehlertext({"error": {"message": "kaputt"}}) == "kaputt"
+    assert higgsfield_mcp._fehlertext({"results": [{"id": "x"}]}) == ""
+
+
+def test_unbekanntes_modell_wird_als_solches_erkannt():
+    assert higgsfield_mcp._unbekanntes_modell(
+        {"error": 'unknown model "higgsfield-ai/soul/standard". '
+                  "Use models_explore to see available models."})
+    assert not higgsfield_mcp._unbekanntes_modell({"error": "not_enough_credits"})
+
+
+def test_auftragsnummer_wird_ueberall_gefunden():
+    assert higgsfield_mcp._auftragsnummer({"results": [{"id": "abc"}]}) == "abc"
+    assert higgsfield_mcp._auftragsnummer({"jobId": "def"}) == "def"
+    assert higgsfield_mcp._auftragsnummer({"error": "kaputt"}) == ""
+
+
+def test_klartextfehler_geht_nicht_verloren():
+    """Antwortet der Dienst mit `isError` und reinem Text statt JSON, muss die
+    Meldung trotzdem ankommen — sonst steht im Logbuch nur „keine Auftragsnummer“."""
+    nachrichten = [{"id": 5, "result": {"isError": True, "content": [
+        {"type": "text", "text": 'unknown model "x"'}]}}]
+    assert higgsfield_mcp._ergebnis(nachrichten, 5) == {"error": 'unknown model "x"'}
+
+
+def test_modelle_normieren_vertraegt_jede_form():
+    """Die Form der Modellliste ist nicht verbürgt. Auf eine zu wetten hieße,
+    denselben Fehler eine Ebene höher zu wiederholen."""
+    erwartet = {"soul_2", "kling2_6_pro"}
+    for roh in ({"models": [{"id": "soul_2"}, {"id": "kling2_6_pro"}]},
+                [{"id": "soul_2"}, {"id": "kling2_6_pro"}],
+                ["soul_2", "kling2_6_pro"],
+                {"results": [{"model": "soul_2"}, {"name": "kling2_6_pro"}]}):
+        assert {e["id"] for e in higgsfield_mcp._modelle_normieren(roh)} == erwartet
+    assert higgsfield_mcp._modelle_normieren("Unsinn") == []
+    assert higgsfield_mcp._modelle_normieren({"nichts": 1}) == []
+
+
+# ── Der Auftrag selbst ───────────────────────────────────────────────────────
+
+def test_bild_schickt_nie_einen_platformnamen(monkeypatch, mit_modellliste):
+    """Der eigentliche Regressionstest: was die Ablaufsteuerung hineingibt, darf
+    so nicht hinausgehen."""
+    gesehen = {}
+
+    def gefaelscht(name, argumente, zeitlimit=60):
+        if name == "generate_image":
+            gesehen["modell"] = argumente["params"]["model"]
+            return {"results": [{"id": "auftrag-1"}]}
+        return {"status": "completed", "result_url": "https://x/y.jpg"}
+
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", gefaelscht)
+    ergebnis = higgsfield_mcp.HiggsfieldAbo().bild(
+        "ein Prompt", modell="higgsfield-ai/soul/standard")
+    assert gesehen["modell"] == "soul_2"
+    assert ergebnis.url.endswith(".jpg")
+
+
+def test_unbekanntes_modell_fuehrt_zu_einem_zweiten_versuch(monkeypatch):
+    """Weist der Dienst den Namen ab, wird die Liste frisch geholt und einmal mit
+    einem Namen wiederholt, den er nachweislich führt."""
+    versuche = []
+
+    def gefaelscht(name, argumente, zeitlimit=60):
+        if name == "models_explore":
+            return {"models": [{"id": "soul_2", "type": "image"}]}
+        if name == "generate_image":
+            versuche.append(argumente["params"]["model"])
+            if len(versuche) == 1:
+                return {"error": 'unknown model "erfunden". '
+                                 "Use models_explore to see available models."}
+            return {"results": [{"id": "auftrag-2"}]}
+        return {"status": "completed", "result_url": "https://x/y.jpg"}
+
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", gefaelscht)
+    monkeypatch.setattr(higgsfield_mcp, "_MODELLE", {"zeit": time.time(), "liste": [
+        {"id": "erfunden", "name": "erfunden", "art": "image"}]})
+
+    ergebnis = higgsfield_mcp.HiggsfieldAbo().bild("ein Prompt", modell="erfunden")
+    assert versuche == ["erfunden", "soul_2"]
+    assert ergebnis.request_id == "auftrag-2"
+
+
+def test_leeres_guthaben_im_abo_wird_verstaendlich_gemeldet(monkeypatch,
+                                                            ohne_modellliste):
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen",
+                        lambda *a, **k: {"error": "not_enough_credits"})
+    with pytest.raises(errors.GuthabenFehler) as info:
+        higgsfield_mcp.HiggsfieldAbo().bild("Prompt")
+    assert "Abo" in info.value.meldung
+
+
+def test_unbekanntes_modell_endet_in_einer_deutschen_meldung(monkeypatch,
+                                                             ohne_modellliste):
+    """Bleibt auch der zweite Versuch erfolglos, darf der Kunde nicht mit einem
+    englischen Rohtext dastehen."""
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen",
+                        lambda *a, **k: {"error": 'unknown model "x". '
+                                                  "Use models_explore."})
+    with pytest.raises(errors.KonfigurationsFehler) as info:
+        higgsfield_mcp.HiggsfieldAbo().bild("Prompt")
+    assert "Modell" in info.value.meldung
+
+
+def test_seitenverhaeltnis_kommt_beim_abo_an(monkeypatch, mit_modellliste):
+    """Hochformat war bestellt — dann darf nicht 16:9 herauskommen."""
+    gesehen = {}
+
+    def gefaelscht(name, argumente, zeitlimit=60):
+        if name == "generate_video":
+            gesehen.update(argumente["params"])
+            return {"results": [{"id": "v1"}]}
+        return {"status": "completed", "result_url": "https://x/y.mp4"}
+
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", gefaelscht)
+    higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
+        "Prompt", "https://bild", dauer=5,
+        modell="kling-video/v2.6/pro/image-to-video", seitenverhaeltnis="9:16")
+    assert gesehen["aspect_ratio"] == "9:16"
+    assert gesehen["model"] == "kling2_6_pro"
+
+
+def test_alle_videowege_nehmen_dasselbe_seitenverhaeltnis_entgegen():
+    """Die Ablaufsteuerung reicht es an jeden Weg durch. Fehlt der Parameter bei
+    einem, fliegt es erst mitten im Auftrag auf — und kostet dann Guthaben."""
+    import inspect
+    for weg in (higgsfield.client, higgsfield_mcp.client, videoquelle.probelauf):
+        for methode in ("video_aus_bild", "video_aus_text"):
+            zeichen = inspect.signature(getattr(weg, methode)).parameters
+            assert "seitenverhaeltnis" in zeichen, f"{weg.name}.{methode}"
+
+
+def test_video_chain_erlaubt_das_abo():
+    """Wer „abo“ in die .env schreibt, soll damit auch etwas bewirken."""
+    assert config._chain("GIBTESNICHT", "abo,demo",
+                         ("platform", "abo", "demo")) == ("abo", "demo")

@@ -94,10 +94,18 @@ Ein Klick auf den gelben Knopf holt den neuen Stand, zieht geänderte Pakete nac
 startet das Programm neu. Der Vorgang dauert etwa eine halbe Minute; die Ansicht
 frischt sich danach von selbst auf.
 
-**Was dabei sicher ist:** Ihre `.env`, alle fertigen Videos und alle Einstellungen
-bleiben unangetastet — sie liegen außerhalb dessen, was aktualisiert wird. Es wird
-ausschließlich vorgespult, nie etwas überschrieben. Solange ein Video erzeugt wird, ist
-der Knopf gesperrt: ein Neustart mittendrin würde Guthaben verbrennen.
+**Was dabei sicher ist:** Ihre `.env`, alle fertigen Videos, die Verbindung zum
+Higgsfield-Abo und alle Einstellungen bleiben unangetastet — sie liegen außerhalb
+dessen, was aktualisiert wird. Es wird ausschließlich vorgespult, nie etwas
+überschrieben. Solange ein Video erzeugt wird, ist der Knopf gesperrt: ein Neustart
+mittendrin würde Guthaben verbrennen.
+
+**Sie müssen nach einem Update nichts umstellen.** Insbesondere die Modellnamen in der
+`.env` dürfen unverändert stehen bleiben.
+
+Falls der Knopf meldet, es gebe *lokale Änderungen*: Im Projektordner einmal
+`git checkout -- .` ausführen, danach klappt das Update. Ihre `.env` und Ihre Videos
+sind davon nicht betroffen — git fasst sie nicht an.
 
 ---
 
@@ -197,6 +205,9 @@ Ein Klick auf ein Lämpchen prüft ebenfalls alles durch.
 | „Kein brauchbares ffmpeg gefunden.“ | `python -m pip install imageio-ffmpeg`, dann neu starten. |
 | „Higgsfield hat den Inhalt abgelehnt.“ | Die Inhaltsprüfung hat angeschlagen. Marken, echte Personen und Gewalt vermeiden. Das Guthaben wird erstattet. |
 | „Es läuft bereits ein Auftrag.“ | Es wird bewusst nur einer gleichzeitig bearbeitet. Abwarten oder abbrechen. |
+| „Higgsfield kennt das eingestellte Modell im Abo nicht.“ | Das Web-Abo führt andere Modellnamen als der API-Zugang. Das Programm übersetzt sie selbst; bleibt die Meldung, im Formular ein anderes Videomodell wählen und oben auf **Update** drücken. |
+| „Das Higgsfield-Abo hat keine Credits mehr.“ | Das Abo selbst ist aufgebraucht. Unter higgsfield.ai nachsehen. Solange erzeugt der Probelauf Platzhalterclips. |
+| „Kein Sprachmodell lieferte ein brauchbares Drehbuch“ | Das Programm hat sich selbst beholfen und läuft weiter — die Videos werden aber sichtbar schwächer. Abhilfe: einmal `claude login` im Terminal ausführen. Das nutzt Ihr Claude-Abo und kostet nichts extra. |
 
 Das Programm startet auch dann, wenn etwas fehlt, und zeigt die offenen Punkte im
 Fenster an. Nichts bricht wortlos ab.
@@ -224,13 +235,15 @@ Fenster an. Nichts bricht wortlos ab.
 
 Aufbau, Module, API-Befunde und Wartungshinweise stehen in
 [`docs/DOKUMENTATION.md`](docs/DOKUMENTATION.md), der geprüfte Stand der Higgsfield-API in
-[`docs/API_BEFUND.md`](docs/API_BEFUND.md).
+[`docs/API_BEFUND.md`](docs/API_BEFUND.md). Was beim ersten Lauf auf dem Kundenrechner
+schiefging und was daraufhin geändert wurde, steht in
+[`docs/BEFUND_2026-08-26.md`](docs/BEFUND_2026-08-26.md).
 
 Tests:
 
 ```
-python -m pytest tests/ -q                    # alle (rund 100 Sekunden)
-python -m pytest tests/ -q -m "not langsam"   # nur die schnellen
+python -m pytest tests/ -q                    # alle 229 (rund 2 Minuten)
+python -m pytest tests/ -q -m "not langsam"   # nur die 217 schnellen
 ```
 
 Start ohne Doppelklick:

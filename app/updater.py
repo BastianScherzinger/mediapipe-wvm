@@ -143,7 +143,10 @@ def _saubere_arbeitskopie() -> tuple[bool, str]:
     if ausgabe.strip():
         geaendert = [z[3:] for z in ausgabe.splitlines()[:5]]
         return False, ("Es gibt lokale Änderungen: " + ", ".join(geaendert) +
-                       ". Sie würden beim Aktualisieren im Weg stehen.")
+                       ". Sie würden beim Aktualisieren im Weg stehen. Wenn diese "
+                       "Änderungen nicht gebraucht werden, im Projektordner einmal "
+                       "„git checkout -- .“ ausführen; danach klappt das Update. "
+                       "Die .env und die fertigen Videos sind davon nicht betroffen.")
     return True, ""
 
 
@@ -176,6 +179,11 @@ def aktualisieren(neustart: bool = True) -> dict:
     logbook.info(QUELLE, "Neuer Stand wird geholt …")
     # Ausschließlich vorspulen: nie zusammenführen, nie etwas überschreiben.
     code, ausgabe = _git("pull", "--ff-only", "--quiet")
+    if code != 0 and "tracking information" in ausgabe.lower():
+        # Der Zweig hat keinen zugehörigen Zweig im Repository. Das kommt vor, wenn die
+        # Arbeitskopie nicht durch `git clone` entstanden ist. Dann wird der Hauptzweig
+        # ausdrücklich benannt — vorspulen bleibt es trotzdem.
+        code, ausgabe = _git("pull", "--ff-only", "--quiet", "origin", "main")
     if code != 0:
         raise errors.AnbieterFehler(
             "Der neue Stand ließ sich nicht holen.",

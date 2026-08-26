@@ -28,6 +28,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import secrets
 import threading
 import time
@@ -49,9 +50,57 @@ _PROTOKOLL = "2025-06-18"
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
-#: Modellnamen des MCP-Dienstes — andere Benennung als bei der Platform-API.
+# ── Modellnamen: der Abo-Dienst spricht eine andere Sprache ──────────────────
+#
+# Platform-API und MCP-Dienst benennen dieselben Modelle unterschiedlich. Die
+# Platform kennt Pfade wie ``higgsfield-ai/soul/standard``; der MCP-Dienst kennt
+# kurze Kennungen ohne Schrägstrich. Reicht man einen Platform-Namen durch,
+# antwortet er mit
+#
+#     unknown model "higgsfield-ai/soul/standard".
+#     Use models_explore(action:'list') to see available models.
+#
+# und der Auftrag ist gescheitert, bevor er begonnen hat. Genau das ist am
+# 26.08.2026 beim Kunden passiert: die Ablaufsteuerung reicht den Namen aus der
+# .env weiter, und dieser Client hat ihn ungeprüft übernommen.
+#
+# Zwei Sicherungen übereinander, damit das nicht wiederkommt:
+#   1. **Kein Platform-Name geht je hinaus.** Alles mit Schrägstrich wird übersetzt.
+#   2. **Der Dienst hat das letzte Wort.** `models_explore` liefert seine eigene
+#      Liste; die schlägt jede Tabelle, falls Higgsfield umbenennt oder erweitert.
+#
+# Die Tabelle ist bewusst eine Kandidatenliste, keine feste Zuordnung: Es wird der
+# erste Eintrag genommen, den der Dienst tatsächlich führt.
+
+#: Rückfallnamen, falls `models_explore` nicht antwortet.
 _BILDMODELL = "soul_2"
-_VIDEOMODELL = "kling3_0_turbo"
+_VIDEOMODELL = "kling2_5_turbo"
+
+#: Platform-Modell → Wunschnamen beim MCP-Dienst, bester zuerst.
+_UEBERSETZUNG: dict[str, tuple[str, ...]] = {
+    "higgsfield-ai/soul/standard": ("soul_2", "soul", "soul_standard", "soul_1"),
+    "higgsfield-ai/soul/turbo/standard": ("soul_2_turbo", "soul_turbo", "soul_2", "soul"),
+    "kling-video/v2.6/pro/image-to-video": ("kling2_6_pro", "kling_2_6_pro",
+                                            "kling2_5_turbo", "kling3_0_turbo"),
+    "kling-video/v2.1/master/image-to-video": ("kling2_1_master", "kling2_1",
+                                               "kling2_5_turbo"),
+    "kling-video/v2.1/standard/image-to-video": ("kling2_1_standard", "kling2_1",
+                                                 "kling2_5_turbo"),
+    "higgsfield-ai/dop/turbo": ("dop_turbo", "higgsfield_dop_turbo", "dop"),
+    "higgsfield-ai/dop/standard": ("dop_standard", "higgsfield_dop", "dop"),
+    "minimax/hailuo-02/standard/text-to-video": ("hailuo_02_standard", "hailuo_02",
+                                                 "minimax_hailuo_02"),
+    "minimax/hailuo-02/pro/text-to-video": ("hailuo_02_pro", "hailuo_02",
+                                            "minimax_hailuo_02"),
+}
+
+#: Wortteile, an denen sich ein Bild- von einem Videomodell unterscheiden lässt.
+_BILDWORTE = ("soul", "image", "img", "photo", "flux", "seedream", "nano", "banana")
+_VIDEOWORTE = ("kling", "video", "hailuo", "dop", "veo", "seedance", "wan", "minimax")
+
+#: Gemerkte Modellliste des Dienstes — einmal je Stunde frisch geholt.
+_MODELLE: dict = {"zeit": 0.0, "liste": []}
+_MODELLE_FRISCHE = 3600.0
 
 _anmeldedatei = config.DATA_DIR / "higgsfield_abo.json"
 _sperre = threading.Lock()
@@ -395,6 +444,78 @@ def _kopfzeilen(token: str, sitzung: str = "") -> dict:
     return kopf
 
 
+def _fehlertext(antwort) -> str:
+    """Die Fehlermeldung aus einer Werkzeugantwort — oder leer, wenn keine drinsteht.
+
+    Der MCP-Dienst meldet fachliche Fehler **nicht** als JSON-RPC-Fehler, sondern
+    als ganz normales Ergebnis mit einem Feld `error`. Wer nur auf den RPC-Fehler
+    schaut, sieht deshalb eine leere Antwort und meldet „keine Auftragsnummer“ —
+    genau die nichtssagende Zeile, die beim Kunden im Logbuch stand.
+    """
+    if isinstance(antwort, dict):
+        for schluessel in ("error", "message", "detail", "reason"):
+            wert = antwort.get(schluessel)
+            if isinstance(wert, str) and wert.strip():
+                return wert.strip()[:300]
+            if isinstance(wert, dict):
+                tiefer = wert.get("message") or wert.get("error")
+                if isinstance(tiefer, str) and tiefer.strip():
+                    return tiefer.strip()[:300]
+    return ""
+
+
+def _unbekanntes_modell(antwort) -> bool:
+    """Sagt der Dienst „unknown model“? Dann hilft nur ein anderer Modellname."""
+    text = _fehlertext(antwort).lower()
+    return "unknown model" in text or "model not found" in text or            ("model" in text and "available" in text)
+
+
+def _auftragsnummer(antwort) -> str:
+    """Die Auftragsnummer aus einer Werkzeugantwort, egal wo sie steckt."""
+    if not isinstance(antwort, dict):
+        return ""
+    treffer = antwort.get("results") or antwort.get("jobs") or []
+    if isinstance(treffer, list) and treffer and isinstance(treffer[0], dict):
+        for feld in ("id", "jobId", "job_id", "request_id"):
+            wert = treffer[0].get(feld)
+            if wert:
+                return str(wert)
+    for feld in ("id", "jobId", "job_id", "request_id"):
+        wert = antwort.get(feld)
+        if wert:
+            return str(wert)
+    return ""
+
+
+def _stand_abfragen(kennung: str) -> dict:
+    """Fragt den Stand eines Auftrags ab.
+
+    Die Argumentform ist nicht verbürgt: `generate_image` will seine Werte in einem
+    Feld `params`, `job_status` nimmt sie nach bisheriger Kenntnis direkt. Weil das
+    nicht nachgemessen ist, werden beide Formen probiert — und die, die trägt, wird
+    gemerkt. Eine falsche Wette hier hätte zur Folge, dass ein längst fertiger
+    Auftrag bis zum Zeitlimit als „läuft“ gilt.
+    """
+    argumente = {"jobId": kennung, "sync": True, "raw_data": True}
+    formen = ([argumente, {"params": argumente}] if _STANDFORM["flach"]
+              else [{"params": argumente}, argumente])
+    letzte: dict = {}
+    for stelle, form in enumerate(formen):
+        antwort = werkzeug_rufen("job_status", form)
+        if isinstance(antwort, dict) and (antwort.get("status") or
+                                          isinstance(antwort.get("raw_data"), dict)):
+            _STANDFORM["flach"] = (form is argumente)
+            return antwort
+        letzte = antwort if isinstance(antwort, dict) else {}
+        if stelle == 0 and not _fehlertext(letzte):
+            break                    # kein Fehler, nur (noch) kein Status — so lassen
+    return letzte
+
+
+#: Welche Argumentform `job_status` angenommen hat. Wird beim ersten Erfolg gesetzt.
+_STANDFORM = {"flach": True}
+
+
 def _ergebnis(nachrichten: list, kennung: int) -> dict:
     """Holt das Ergebnis zur eigenen Anfrage und packt es aus."""
     for nachricht in nachrichten:
@@ -408,12 +529,23 @@ def _ergebnis(nachrichten: list, kennung: int) -> dict:
         if isinstance(rueckgabe, dict):
             if isinstance(rueckgabe.get("structuredContent"), dict):
                 return rueckgabe["structuredContent"]
+            klartext = ""
             for stueck in (rueckgabe.get("content") or []):
                 if stueck.get("type") == "text":
+                    roh = stueck.get("text", "")
                     try:
-                        return json.loads(stueck.get("text", ""))
+                        geparst = json.loads(roh)
                     except ValueError:
+                        klartext = klartext or str(roh)[:300]
                         continue
+                    if isinstance(geparst, dict):
+                        return geparst
+                    if isinstance(geparst, list):
+                        return {"results": geparst}
+            if klartext:
+                # Reiner Text statt JSON — bei `isError` ist das die Fehlermeldung,
+                # sonst eine Auskunft. So oder so darf sie nicht verlorengehen.
+                return {"error": klartext} if rueckgabe.get("isError") else                        {"text": klartext}
             return rueckgabe
     return {}
 
@@ -456,6 +588,149 @@ def werkzeug_rufen(name: str, argumente: dict, zeitlimit: int = 60) -> dict:
     return _ergebnis(_zerlegen(antwort), kennung)
 
 
+# ── Welche Modelle kennt der Dienst? ─────────────────────────────────────────
+
+def _modelle_normieren(antwort) -> list[dict]:
+    """Macht aus der Antwort von `models_explore` eine schlichte Liste.
+
+    Die Form ist nicht verbürgt — mal eine Liste, mal ein Objekt mit `models`,
+    mal Zeichenketten statt Objekten. Statt auf eine Form zu wetten, wird jede
+    plausible ausgepackt; was sich nicht auspacken lässt, fällt weg.
+    """
+    roh = antwort
+    if isinstance(roh, dict):
+        for schluessel in ("models", "results", "items", "data", "list", "available"):
+            if isinstance(roh.get(schluessel), list):
+                roh = roh[schluessel]
+                break
+        else:
+            listen = [w for w in roh.values() if isinstance(w, list)]
+            roh = listen[0] if listen else []
+    if not isinstance(roh, list):
+        return []
+
+    liste: list[dict] = []
+    for eintrag in roh:
+        if isinstance(eintrag, str):
+            eintrag = {"id": eintrag}
+        if not isinstance(eintrag, dict):
+            continue
+        kennung = str(eintrag.get("id") or eintrag.get("model") or
+                      eintrag.get("name") or eintrag.get("slug") or "").strip()
+        if not kennung:
+            continue
+        liste.append({
+            "id": kennung,
+            "name": str(eintrag.get("name") or kennung),
+            "art": str(eintrag.get("type") or eintrag.get("kind") or
+                       eintrag.get("category") or "").lower(),
+        })
+    return liste
+
+
+def modellliste(erneuern: bool = False) -> list[dict]:
+    """Die Modelle, die der Abo-Dienst wirklich führt. Eine Stunde lang gemerkt.
+
+    Scheitert der Abruf, wird eine leere Liste zurückgegeben — dann greift die
+    Übersetzungstabelle. Ein Fehler hier darf niemals einen Auftrag verhindern.
+    """
+    if not erneuern and _MODELLE["liste"] and             time.time() - _MODELLE["zeit"] < _MODELLE_FRISCHE:
+        return list(_MODELLE["liste"])
+
+    liste: list[dict] = []
+    for argumente in ({"action": "list"}, {"params": {"action": "list"}}, {}):
+        try:
+            liste = _modelle_normieren(werkzeug_rufen("models_explore", argumente,
+                                                      zeitlimit=30))
+        except errors.StudioFehler:
+            liste = []
+        except Exception:
+            liste = []
+        if liste:
+            break
+
+    if liste:
+        _MODELLE.update({"zeit": time.time(), "liste": liste})
+        logbook.debug(QUELLE, f"{len(liste)} Modelle beim Abo-Dienst gefunden.")
+    return list(liste)
+
+
+def _teile(name: str) -> list[str]:
+    """Zerlegt einen Modellnamen in Wortteile — „kling-video/v2.6/pro“ wird zu
+    ['kling','video','v2','6','pro']. Damit lassen sich zwei Benennungen
+    vergleichen, ohne dass eine davon die richtige sein muss."""
+    return [t for t in re.split(r"[^a-z0-9]+", (name or "").lower()) if t]
+
+
+def _ist_video(kennung: str, art: str = "") -> bool:
+    if "video" in art:
+        return True
+    if "image" in art or "bild" in art:
+        return False
+    return any(wort in kennung.lower() for wort in _VIDEOWORTE)
+
+
+def _passt_zur_art(eintrag: dict, art: str) -> bool:
+    video = _ist_video(eintrag["id"], eintrag.get("art", ""))
+    if art == "video":
+        return video
+    return not video or any(w in eintrag["id"].lower() for w in _BILDWORTE)
+
+
+def _aehnlichkeit(kandidat: str, wunsch: list[str]) -> int:
+    """Wie viele Wortteile des Wunsches stecken im Kandidaten? Grob, aber genau
+    grob genug, um „kling-video/v2.6/pro“ auf „kling2_6_pro“ zu bringen."""
+    text = "".join(_teile(kandidat))
+    return sum(1 for teil in wunsch if teil and teil in text)
+
+
+def modell_aufloesen(wunsch: str, art: str) -> str:
+    """Übersetzt einen Modellwunsch in einen Namen, den der Abo-Dienst versteht.
+
+    `art` ist „bild“ oder „video“. Die Reihenfolge:
+      1. Kennt der Dienst den Namen wörtlich? Dann bleibt er.
+      2. Steht er in der Übersetzungstabelle, und kennt der Dienst einen der
+         Kandidaten? Dann dieser.
+      3. Sonst der ähnlichste Name der richtigen Art aus der Liste des Dienstes.
+      4. Ohne Liste: der erste Tabelleneintrag, sonst der Rückfallname.
+
+    Es wird **nie** ein Platform-Name (mit Schrägstrich) hinausgereicht — der
+    würde sicher als „unknown model“ abgewiesen.
+    """
+    wunsch = (wunsch or "").strip()
+    rueckfall = _VIDEOMODELL if art == "video" else _BILDMODELL
+    bekannt = modellliste()
+    kennungen = {e["id"] for e in bekannt}
+
+    if wunsch and wunsch in kennungen:
+        return wunsch
+
+    kandidaten = _UEBERSETZUNG.get(wunsch, ())
+    for kandidat in kandidaten:
+        if kandidat in kennungen:
+            return kandidat
+
+    if wunsch and "/" not in wunsch and not bekannt:
+        # Kein Platform-Name und keine Liste zum Gegenprüfen: dem Aufrufer glauben.
+        return wunsch
+
+    if bekannt:
+        passende = [e for e in bekannt if _passt_zur_art(e, art)] or bekannt
+        wunschteile = _teile(wunsch) + [t for k in kandidaten for t in _teile(k)]
+        bester = max(passende, key=lambda e: _aehnlichkeit(e["id"], wunschteile))
+        if _aehnlichkeit(bester["id"], wunschteile) > 0:
+            return bester["id"]
+        for kandidat in kandidaten:                 # nichts ähnlich: Tabelle blind
+            return kandidat
+        return passende[0]["id"]
+
+    if kandidaten:
+        return kandidaten[0]
+    if wunsch and "/" not in wunsch:
+        return wunsch
+    return rueckfall            # leerer oder unbekannter Platform-Pfad
+
+
 # ── Derselbe Umgang wie beim Platform-Client ─────────────────────────────────
 
 class HiggsfieldAbo:
@@ -467,17 +742,54 @@ class HiggsfieldAbo:
     def verfuegbar(self) -> bool:
         return angemeldet()
 
-    def _auftrag(self, werkzeug: str, parameter: dict, *, art: str, modell: str,
+    @staticmethod
+    def _abschicken(werkzeug: str, bauen, modell: str) -> dict:
+        """Einen Auftrag mit genau diesem Modellnamen abschicken."""
+        return werkzeug_rufen(werkzeug, {"params": bauen(modell)}, zeitlimit=90)
+
+    def _auftrag(self, werkzeug: str, bauen, *, art: str, wunsch: str,
                  abbruch: threading.Event | None, melden) -> higgsfield.Ergebnis:
+        """Auftrag abschicken und auf das Ergebnis warten.
+
+        `bauen` ist eine Funktion, die zu einem Modellnamen die Parameter liefert.
+        Das ist kein Selbstzweck: Weist der Dienst das Modell ab, muss derselbe
+        Auftrag mit einem anderen Namen noch einmal gebaut werden können.
+        """
         begonnen = time.monotonic()
-        antwort = werkzeug_rufen(werkzeug, {"params": parameter}, zeitlimit=90)
-        treffer = antwort.get("results") or []
-        kennung = ((treffer[0].get("id") if treffer and isinstance(treffer[0], dict) else "")
-                   or antwort.get("id"))
+        modell = modell_aufloesen(wunsch, art)
+        antwort = self._abschicken(werkzeug, bauen, modell)
+
+        kennung = _auftragsnummer(antwort)
+        if not kennung and _unbekanntes_modell(antwort):
+            # Der Dienst kennt dieses Modell nicht (mehr). Einmal die Liste frisch
+            # holen und mit einem Namen wiederholen, den er nachweislich führt —
+            # das ist der Fall, an dem die Übergabe am 26.08.2026 gescheitert ist.
+            modellliste(erneuern=True)
+            zweiter = modell_aufloesen(wunsch, art)
+            if zweiter != modell:
+                logbook.warnung(QUELLE, f"Modell „{modell}“ ist dem Abo-Dienst unbekannt "
+                                        f"— es wird „{zweiter}“ genommen.")
+                modell = zweiter
+                antwort = self._abschicken(werkzeug, bauen, modell)
+                kennung = _auftragsnummer(antwort)
+
         if not kennung:
+            grund = config.entschaerfe(_fehlertext(antwort) or str(antwort)[:200])
+            klein = grund.lower()
+            if _unbekanntes_modell(antwort):
+                raise errors.KonfigurationsFehler(
+                    "Higgsfield kennt das eingestellte Modell im Abo nicht.",
+                    f"Der Dienst meldet: {grund}. Bitte im Formular ein anderes Modell "
+                    "wählen — oder das Programm über „Update“ auf den neuesten Stand "
+                    "bringen.", ursprung=QUELLE)
+            if "credit" in klein or "quota" in klein or "insufficient" in klein:
+                raise errors.GuthabenFehler(
+                    "Das Higgsfield-Abo hat keine Credits mehr.",
+                    "Unter higgsfield.ai das Guthaben prüfen. Solange erzeugt der "
+                    "Probelauf Platzhalterclips.", ursprung=QUELLE)
             raise errors.AnbieterFehler(
                 "Higgsfield hat keine Auftragsnummer zurückgegeben.",
-                config.entschaerfe(str(antwort)[:200]), ursprung=QUELLE)
+                grund, ursprung=QUELLE)
 
         erwartet = 25.0 if art == "bild" else 150.0
         while True:
@@ -489,10 +801,19 @@ class HiggsfieldAbo:
                     f"Higgsfield ist nach {int(vergangen / 60)} Minuten nicht fertig geworden.",
                     "Bitte mit einer kürzeren Szene erneut versuchen.", ursprung=QUELLE)
 
-            stand = werkzeug_rufen("job_status",
-                                   {"jobId": kennung, "sync": True, "raw_data": True})
+            stand = _stand_abfragen(kennung)
             roh = stand.get("raw_data") if isinstance(stand.get("raw_data"), dict) else stand
             zustand = str(roh.get("status") or "").lower()
+
+            # Meldet die Abfrage selbst einen Fehler, hat weiteres Warten keinen Sinn.
+            # Ohne diese Prüfung liefe die Schleife bis zum Zeitlimit — der Kunde säße
+            # eine Viertelstunde vor einem Auftrag, der längst gescheitert ist.
+            if not zustand:
+                grund = _fehlertext(stand)
+                if grund:
+                    raise errors.AnbieterFehler(
+                        "Higgsfield kann den Stand des Auftrags nicht mitteilen.",
+                        config.entschaerfe(grund), ursprung=QUELLE)
 
             if zustand in ("completed", "succeeded", "success", "done"):
                 adresse = (roh.get("result_url") or roh.get("min_result_url") or
@@ -528,31 +849,38 @@ class HiggsfieldAbo:
     def bild(self, prompt: str, *, seitenverhaeltnis: str = "16:9", aufloesung: str = "1080p",
              modell: str = "", verbessern: bool = True, saat: int | None = None,
              abbruch: threading.Event | None = None, melden=None) -> higgsfield.Ergebnis:
-        einstellung = modell or _BILDMODELL
-        return self._auftrag("generate_image", {
-            "model": einstellung, "prompt": prompt[:config.MAX_PROMPT_CHARS],
-            "aspect_ratio": seitenverhaeltnis, "count": 1,
-        }, art="bild", modell=einstellung, abbruch=abbruch, melden=melden)
+        def bauen(einstellung: str) -> dict:
+            return {"model": einstellung, "prompt": prompt[:config.MAX_PROMPT_CHARS],
+                    "aspect_ratio": seitenverhaeltnis, "count": 1}
+
+        return self._auftrag("generate_image", bauen, wunsch=modell or config.IMAGE_MODEL,
+                             art="bild", abbruch=abbruch, melden=melden)
 
     def video_aus_bild(self, prompt: str, bild_url: str, *, dauer: int = 5,
                        modell: str = "", saat: int | None = None,
                        bewegungen: list[str] | None = None,
+                       seitenverhaeltnis: str = "16:9",
                        abbruch: threading.Event | None = None,
                        melden=None) -> higgsfield.Ergebnis:
-        einstellung = _VIDEOMODELL          # die Platform-Modellnamen gelten hier nicht
-        parameter = {"model": einstellung, "prompt": prompt[:config.MAX_PROMPT_CHARS],
-                     "aspect_ratio": "16:9", "count": 1}
-        if bild_url:
-            parameter["image_url"] = bild_url
-        if dauer:
-            parameter["duration"] = int(dauer)
-        return self._auftrag("generate_video", parameter, art="video",
-                             modell=einstellung, abbruch=abbruch, melden=melden)
+        def bauen(einstellung: str) -> dict:
+            parameter = {"model": einstellung, "prompt": prompt[:config.MAX_PROMPT_CHARS],
+                         "aspect_ratio": seitenverhaeltnis, "count": 1}
+            if bild_url:
+                parameter["image_url"] = bild_url
+            if dauer:
+                parameter["duration"] = int(dauer)
+            return parameter
+
+        return self._auftrag("generate_video", bauen, wunsch=modell or config.VIDEO_MODEL,
+                             art="video", abbruch=abbruch, melden=melden)
 
     def video_aus_text(self, prompt: str, *, dauer: int = 6, modell: str = "",
+                       seitenverhaeltnis: str = "16:9",
                        abbruch: threading.Event | None = None,
                        melden=None) -> higgsfield.Ergebnis:
-        return self.video_aus_bild(prompt, "", dauer=dauer, abbruch=abbruch, melden=melden)
+        return self.video_aus_bild(prompt, "", dauer=dauer, modell=modell,
+                                   seitenverhaeltnis=seitenverhaeltnis,
+                                   abbruch=abbruch, melden=melden)
 
     def herunterladen(self, url, ziel, abbruch=None, melden=None) -> Path:
         # Das Herunterladen unterscheidet sich nicht — den erprobten Weg mitbenutzen.

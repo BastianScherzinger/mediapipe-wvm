@@ -368,15 +368,20 @@ def _schritt_bild_und_video(auftrag_id: str, e: Einstellungen,
             _fortschritt(auftrag_id, "video", gesamt, min(gesamtrest, 3600),
                          f"Szene {_s}/{anzahl} · {zustand}")
 
+        # Das Seitenverhältnis geht an jeden Weg mit. Die Platform-API übergeht es
+        # (ihre Videomodelle übernehmen das Format vom Startbild), der Abo-Weg braucht
+        # es — dort entstünde sonst ein 16:9-Clip, obwohl Hochformat bestellt war.
         if braucht_bild:
             ergebnis = dienst.video_aus_bild(
                 szene.video_prompt, bilder[stelle], dauer=szene.dauer,
                 modell=e.videomodell,
                 bewegungen=[e.bewegung] if e.bewegung else None,
+                seitenverhaeltnis=e.seitenverhaeltnis,
                 abbruch=abbruch, melden=videomeldung)
         else:
             ergebnis = dienst.video_aus_text(
                 szene.video_prompt, dauer=szene.dauer, modell=e.videomodell,
+                seitenverhaeltnis=e.seitenverhaeltnis,
                 abbruch=abbruch, melden=videomeldung)
 
         clippfad = ordner / f"szene_{stelle:02d}.mp4"

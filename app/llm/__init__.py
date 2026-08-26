@@ -124,10 +124,14 @@ def erzeuge(system: str, auftrag: str, *, zeitlimit: int = 240,
             # Ein einzelner Netzhänger dagegen kann beim nächsten Mal weg sein.
             if isinstance(fehler, (errors.ZugangFehler, errors.GuthabenFehler,
                                    errors.KonfigurationsFehler)):
-                _sperren(name, fehler.meldung)
+                _sperren(name, f"{fehler.meldung} {fehler.hinweis}".strip())
             else:
-                logbook.warnung(QUELLE, f"{modul.ANZEIGENAME}: {fehler.meldung} — "
-                                        "nächster Weg wird versucht.")
+                # Der Grund gehört ins Logbuch, nicht nur in die Ausnahme: Beim Kunden
+                # stand am 26.08.2026 nur „Die Claude-CLI meldet einen Fehler.“ im Log —
+                # ohne den Satz dahinter war nicht zu erkennen, woran es lag.
+                logbook.warnung(QUELLE, f"{modul.ANZEIGENAME}: "
+                                        f"{fehler.meldung} {fehler.hinweis}".strip() +
+                                        " — nächster Weg wird versucht.")
         except Exception as fehler:                       # unerwartet, aber nicht tödlich
             uebersetzt = errors.aus_ausnahme(fehler, ursprung=QUELLE)
             probleme.append(f"{name}: {uebersetzt.meldung}")

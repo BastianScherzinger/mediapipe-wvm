@@ -494,9 +494,16 @@ class Higgsfield:
     def video_aus_bild(self, prompt: str, bild_url: str, *, dauer: int = 5,
                        modell: str = "", saat: int | None = None,
                        bewegungen: list[str] | None = None,
+                       seitenverhaeltnis: str = "16:9",
                        abbruch: threading.Event | None = None, melden=None) -> Ergebnis:
         """Animiert ein vorhandenes Bild. `dauer` wird auf einen vom Modell erlaubten Wert
-        gebracht, statt den Dienst mit einem ungültigen Wert abzuweisen."""
+        gebracht, statt den Dienst mit einem ungültigen Wert abzuweisen.
+
+        `seitenverhaeltnis` wird angenommen, aber nicht mitgeschickt: Die Videomodelle
+        der Platform-API kennen kein `aspect_ratio` (docs/API_BEFUND.md, Zeile 94 —
+        nur die Bildmodelle führen es), sie übernehmen das Format vom Startbild. Der
+        Parameter steht hier, damit alle drei Videowege dieselbe Schnittstelle haben
+        und die Ablaufsteuerung nicht unterscheiden muss, mit wem sie spricht."""
         modell = modell or config.VIDEO_MODEL
         rumpf: dict = {"prompt": prompt[:config.MAX_PROMPT_CHARS],
                        "image_url": bild_url,
@@ -511,6 +518,7 @@ class Higgsfield:
                            abbruch=abbruch, melden=melden)
 
     def video_aus_text(self, prompt: str, *, dauer: int = 6, modell: str = "",
+                       seitenverhaeltnis: str = "16:9",
                        abbruch: threading.Event | None = None, melden=None) -> Ergebnis:
         """Erzeugt ein Video ohne Zwischenbild."""
         modell = modell or config.T2V_MODEL

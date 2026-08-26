@@ -1,9 +1,14 @@
 # MEDIAPIPE WVM — technische Dokumentation
 
-Stand 03.08.2026 · Version 1.0.0
+Stand 26.08.2026 · Version 1.0.0
 
 Diese Datei richtet sich an denjenigen, der das Werkzeug später ändert oder erweitert.
 Für die Bedienung genügt die [README](../README.md).
+
+> **Zuerst lesen, wenn etwas klemmt:** [`BEFUND_2026-08-26.md`](BEFUND_2026-08-26.md).
+> Dort steht, was beim ersten Lauf auf dem Kundenrechner schiefging, woran es lag, was
+> daraufhin geändert wurde und was noch offen ist. Es ist die jüngste Prüfung und geht
+> im Zweifel diesem Dokument vor.
 
 ---
 
@@ -57,11 +62,21 @@ Oberfläche sagt, welcher Weg gerade trägt.
 
 **Sprachmodell** (`MPW_LLM_CHAIN`, Vorgabe `cli,api,local`)
 
-| Stufe | Wann sie greift | Stand 03.08.2026 |
-|---|---|---|
-| `cli` | Claude-CLI über die Abo-Anmeldung, kein Guthaben nötig | **funktioniert** |
-| `api` | `ANTHROPIC_KEY` mit Guthaben | **funktioniert** |
-| `local` | Ollama auf dem Rechner | läuft, `qwen2.5:7b` |
+| Stufe | Wann sie greift | Entwicklungsrechner 03.08.2026 | Kundenrechner 26.08.2026 |
+|---|---|---|---|
+| `cli` | Claude-CLI über die Abo-Anmeldung, kein Guthaben nötig | **funktioniert** | Fehler — Grund wurde damals nicht protokolliert |
+| `api` | `ANTHROPIC_KEY` mit Guthaben | **funktioniert** | **kein Guthaben mehr** |
+| `local` | Ollama auf dem Rechner | läuft, `qwen2.5:7b` | nicht installiert |
+
+Trägt keine Stufe, baut `promptsmith._notbehelf()` das Drehbuch selbst. Das Programm
+läuft dann weiter — mit sichtbar schwächerer Qualität, weil die Bildprompts auf Deutsch
+bleiben. Es ist ein Notausgang, kein Betriebszustand.
+
+> **Ein ungültiges Abo-Token macht den CLI-Weg nicht mehr kaputt.** `CLAUDE_CODE_OAUTH_TOKEN`
+> aus der `.env` wird in die Umgebung der CLI gesetzt und **überschreibt damit die
+> Anmeldung des Rechners**. Gilt es nicht mehr, war der Weg früher tot, obwohl
+> `claude login` getragen hätte. `claude_cli.erzeuge()` versucht es bei einem
+> Zugangsfehler deshalb ein zweites Mal ohne Token.
 
 > **Zum Abo-Token.** In der `.env` steht `CLAUDE_CODE_OAUTH_TOKEN`. Damit läuft der
 > CLI-Weg auch auf einem Rechner, auf dem nie `claude login` ausgeführt wurde — genau
@@ -79,15 +94,17 @@ sperrt nicht — der kann beim nächsten Mal weg sein.
 
 **Video** (`MPW_VIDEO_CHAIN`, Auswahl in `videoquelle.aktiv()`)
 
-| Stufe | Was sie ist | Stand 03.08.2026 |
+| Stufe | Was sie ist | Stand |
 |---|---|---|
-| `platform` | Platform-API mit dem Schlüssel aus der `.env` | Schlüssel gültig, **kein Guthaben** (403 bei allen Modellen) |
-| `abo` | MCP-Dienst mit den Credits des Web-Abos | eingebaut, braucht **einmalige Anmeldung** im Dashboard |
+| `platform` | Platform-API mit dem Schlüssel aus der `.env` | Schlüssel gültig, **kein Guthaben** (403 bei allen Modellen, 03.08.2026) |
+| `abo` | MCP-Dienst mit den Credits des Web-Abos | beim Kunden verbunden und mit Credits (26.08.2026) |
 | `demo` | Platzhalterclips aus ffmpeg, ohne Netz | jederzeit einsatzbereit |
 
 > **Der Abo-Weg steht bewusst nicht in der Vorgabekette.** Sobald er angemeldet ist,
 > schiebt `videoquelle._reihenfolge()` ihn selbsttätig nach vorn — er ist dann der
-> einzige mit Guthaben. Niemand muss dafür die `.env` anfassen.
+> einzige mit Guthaben. Niemand muss dafür die `.env` anfassen. Wer ihn trotzdem
+> festschreiben will, darf `abo` seit dem 26.08.2026 in `MPW_VIDEO_CHAIN` eintragen;
+> vorher hat `config._chain()` ihn stillschweigend herausgefiltert.
 
 **„Verfügbar“ genügt nicht.** Ein hinterlegter Schlüssel auf einem leeren Guthabentopf
 ist eingerichtet und trotzdem nutzlos. Würde die Auswahl nur `verfuegbar` prüfen, zöge
@@ -112,8 +129,34 @@ Anmelde-URL mit PKCE/S256 und nimmt die Antwort auf einem lokalen Port zwischen 
 weiteren Starts brauchen keinen Browser mehr. Der Dienst spricht MCP über HTTP und
 antwortet wahlweise als JSON oder als Ereignisstrom; `_zerlegen()` versteht beides.
 
-Die Modellnamen unterscheiden sich von der Platform-API: dort `higgsfield-ai/soul/standard`,
-hier schlicht `soul_2` und `kling3_0_turbo`.
+**Die Modellnamen unterscheiden sich von der Platform-API** — dort Pfade wie
+`higgsfield-ai/soul/standard`, hier kurze Kennungen ohne Schrägstrich. Wird ein
+Platform-Name durchgereicht, antwortet der Dienst mit `unknown model` und der Auftrag
+ist gescheitert, bevor er begonnen hat. Genau daran ist der erste Lauf beim Kunden am
+26.08.2026 abgebrochen (→ [`BEFUND_2026-08-26.md`](BEFUND_2026-08-26.md), Abschnitt 2).
+
+Seither übersetzt `higgsfield_mcp.modell_aufloesen(wunsch, art)`, und zwar mit zwei
+Sicherungen übereinander:
+
+1. **Kein Platform-Name verlässt je den Abo-Weg.** Alles mit Schrägstrich geht durch die
+   Tabelle `_UEBERSETZUNG` — eine Kandidatenliste je Modell, nicht eine feste Zuordnung.
+2. **Der Dienst hat das letzte Wort.** `modellliste()` fragt `models_explore` und merkt
+   sich die Antwort eine Stunde lang. Was der Dienst führt, schlägt jede Tabelle.
+
+Weist er ein Modell trotzdem ab, wird die Liste frisch geholt und der Auftrag **einmal**
+mit einem nachweislich vorhandenen Namen wiederholt. Das steht dann so im Logbuch:
+
+```
+Modell „…“ ist dem Abo-Dienst unbekannt — es wird „…“ genommen.
+```
+
+Wer diese Zeile sieht, trägt den genannten Namen in `_UEBERSETZUNG` nach; dann entfällt
+der Umweg über den zweiten Versuch.
+
+> Die Kennungen in `_UEBERSETZUNG` sind **nicht nachgemessen** — `mcp.higgsfield.ai`
+> beantwortet ohne Anmeldung jede Anfrage mit `401`, auch `tools/list`. Die
+> Laufzeitabfrage ist deshalb die eigentliche Absicherung, die Tabelle nur der
+> Rückfall.
 
 **Für die Übergabe:** `data/higgsfield_abo.json` ist von `.gitignore` erfasst. Wer die
 Anmeldung auf den Kundenrechner mitgeben will, kopiert die Datei mit der `.env` zusammen;
@@ -302,8 +345,8 @@ sehen war nichts. Jetzt rollt die Spalte als Ganzes, und die Kacheln behalten ü
 ## 7. Tests
 
 ```
-python -m pytest tests/ -q                    # 212 Tests, rund 95 Sekunden
-python -m pytest tests/ -q -m "not langsam"   # ohne echte ffmpeg-Läufe, ~5 Sekunden
+python -m pytest tests/ -q                    # 229 Tests, rund 2 Minuten
+python -m pytest tests/ -q -m "not langsam"   # 217, ohne echte ffmpeg-Läufe, ~5 Sekunden
 ```
 
 | Datei | Inhalt |
@@ -314,7 +357,7 @@ python -m pytest tests/ -q -m "not langsam"   # ohne echte ffmpeg-Läufe, ~5 Sek
 | `test_media.py` | Formatvorgaben, Dateiangaben, echte ffmpeg-Läufe |
 | `test_pipeline.py` | Auftragsspeicher, Eingabeprüfung, Pfadsicherheit, Bibliothek |
 | `test_updater.py` | Nur-Vorspulen, Sperre während eines Auftrags, Neustart |
-| `test_videoquelle.py` | Wahl des Videowegs, Guthabengedächtnis, Abo-Anmeldung |
+| `test_videoquelle.py` | Wahl des Videowegs, Guthabengedächtnis, Abo-Anmeldung, **Übersetzung der Modellnamen** |
 | `test_kopfzeile.py` | Beschriftungen und Ampelfarben über die echten Routen |
 | `test_ende_zu_ende.py` | **die ganze Kette** mit Higgsfield-Attrappe |
 
@@ -325,6 +368,13 @@ einmal „fertig“ meldet und die Übergänge in der richtigen Reihenfolge komm
 
 Was er **nicht** kann: die Bildqualität von Higgsfield beurteilen. Sobald Guthaben da
 ist, gehört ein echter Durchlauf gefahren (Aufgabe P13).
+
+Was er ebenfalls nicht kann — und das hat am 26.08.2026 Geld und Zeit gekostet: **den
+echten MCP-Dienst befragen.** Die Attrappe hat jeden Modellnamen angenommen, den echten
+Dienst hätte er zum `unknown model` gebracht. Ein Test, der die Annahme mitmacht, die er
+prüfen sollte, prüft nichts. `test_bild_schickt_nie_einen_platformnamen` schließt
+wenigstens die eine Lücke, die aufgefallen ist: Was die Ablaufsteuerung hineingibt, darf
+so nicht hinausgehen.
 
 ---
 

@@ -96,7 +96,12 @@ CLAUDE_OAUTH_TOKEN: str = _str("CLAUDE_CODE_OAUTH_TOKEN")
 
 # ── Anbieterketten ───────────────────────────────────────────────────────────
 LLM_CHAIN: tuple[str, ...] = _chain("MPW_LLM_CHAIN", "cli,api,local", ("cli", "api", "local"))
-VIDEO_CHAIN: tuple[str, ...] = _chain("MPW_VIDEO_CHAIN", "platform,demo", ("platform", "demo"))
+# „abo“ ist ausdrücklich erlaubt, auch wenn es nicht in der Vorgabe steht: wer den
+# Abo-Weg in der .env festschreiben will, soll das können. Ohne diesen Eintrag hätte
+# `_chain` ihn stillschweigend herausgefiltert — und der Kunde hätte sich gewundert,
+# warum seine Einstellung nichts bewirkt.
+VIDEO_CHAIN: tuple[str, ...] = _chain("MPW_VIDEO_CHAIN", "platform,demo",
+                                      ("platform", "abo", "demo"))
 
 CLAUDE_CLI_MODEL: str = _str("MPW_CLAUDE_CLI_MODEL", "sonnet")
 CLAUDE_API_MODEL: str = _str("MPW_CLAUDE_API_MODEL", "claude-sonnet-4-5-20250929")
