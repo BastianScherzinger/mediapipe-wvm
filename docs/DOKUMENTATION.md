@@ -47,7 +47,7 @@ templates/index.html  Struktur + eingebetteter Iconsatz
 data/                 auftraege.db, laufzeiten.json, guthabenstand.json,
                       higgsfield_abo.json
 output/               ein Ordner je Video
-tests/                229 Tests
+tests/                251 Tests
 ```
 
 **Abhängigkeitsrichtung:** `server → pipeline → {promptsmith, higgsfield, media, library,

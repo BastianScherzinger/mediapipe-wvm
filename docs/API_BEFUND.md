@@ -3,17 +3,31 @@
 Alles hier Dokumentierte wurde mit echten Aufrufen ermittelt, nicht aus Dokumentation
 abgeschrieben. Grundlage für `app/higgsfield.py` und `app/llm/`.
 
-> **Achtung, das kostete am 26.08.2026 einen Kundenlauf:** Sämtliche Modellpfade in
-> Abschnitt 3 gelten **ausschließlich für die Platform-API** (`platform.higgsfield.ai`).
-> Der MCP-Dienst des Web-Abos (`mcp.higgsfield.ai`) kennt sie **nicht** — er führt kurze
-> Kennungen ohne Schrägstrich und antwortet auf einen Platform-Pfad mit `unknown model`.
-> `higgsfield_mcp.modell_aufloesen()` übersetzt deshalb, bevor etwas hinausgeht.
-> Einzelheiten: [`BEFUND_2026-08-26.md`](BEFUND_2026-08-26.md).
+> **Achtung — das kostete zwei Kundenläufe:** Alles in diesem Dokument gilt
+> **ausschließlich für die Platform-API** (`platform.higgsfield.ai`). Der MCP-Dienst des
+> Web-Abos (`mcp.higgsfield.ai`) spricht an mehreren Stellen anders. Zweimal ist genau
+> diese Übertragung schiefgegangen:
 >
-> Die MCP-Kennungen ließen sich hier **nicht** nachmessen: `mcp.higgsfield.ai`
-> beantwortet ohne Anmeldung jede Anfrage mit `401`, auch `tools/list`. Sie sind das
-> einzige in diesem Projekt, das nicht live geprüft ist — abgesichert wird das durch
-> eine Laufzeitabfrage (`models_explore`), nicht durch eine Annahme.
+> | Feld | Platform-API (hier dokumentiert) | MCP-Dienst (Abo-Weg) |
+> |---|---|---|
+> | Modell | Pfade wie `higgsfield-ai/soul/standard` | kurze Kennungen ohne Schrägstrich; ein Pfad ergibt `unknown model` |
+> | Startbild | `image_url` mit einer HTTPS-Adresse | **nur** Kennungen in `params.medias` (Medium oder fertiger Auftrag) |
+>
+> Beide Male war das Startbild zu diesem Zeitpunkt schon erzeugt und **bezahlt**.
+> `higgsfield_mcp` übersetzt deshalb beides, bevor etwas hinausgeht
+> (`modell_aufloesen()`, `medienkennung()`). Einzelheiten:
+> [`BEFUND_2026-08-26.md`](BEFUND_2026-08-26.md) und
+> [`BEFUND_2026-09-05.md`](BEFUND_2026-09-05.md).
+>
+> **Die MCP-Seite ließ sich hier nicht nachmessen:** `mcp.higgsfield.ai` beantwortet
+> ohne Anmeldung jede Anfrage mit `401`, auch `tools/list`. Sie ist das einzige in
+> diesem Projekt, das nicht live geprüft ist — abgesichert wird das durch
+> Laufzeitabfragen (`models_explore`, `tools/list`) und dadurch, dass beide plausiblen
+> Formen probiert werden, nicht durch eine Annahme.
+>
+> **Regel daraus:** Kein Feld aus diesem Dokument ungeprüft in `higgsfield_mcp.py`
+> übernehmen. Was für die Platform-API belegt ist, ist für den Abo-Weg nur eine
+> Vermutung.
 
 ---
 
