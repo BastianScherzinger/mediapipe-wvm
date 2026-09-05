@@ -69,11 +69,17 @@
       ? el("img", { src: "/medien/" + video.poster, alt: "", loading: "lazy" })
       : el("div", { klasse: "karte-bild-leer" }, [icon("film")]);
 
+    // Hochkante Videos werden nicht quer beschnitten, sondern ganz gezeigt (siehe CSS).
+    const hoch = video.hoehe > video.breite;
+
     const flaeche = el("button", {
       klasse: "karte-bild",
       type: "button",
       title: "Abspielen",
       "aria-label": "Abspielen: " + video.titel,
+      daten: hoch ? { hoch: "ja" } : {},
+      style: hoch && video.poster
+        ? `--kachel-grund: url("/medien/${encodeURI(video.poster)}")` : null,
       onclick: () => abspielen(video),
     }, [
       bild,
@@ -182,9 +188,14 @@
 
   function abspielen(video) {
     $("#schau-titel").textContent = video.titel;
+    // Ein 9:16-Clip in einem 1080 px breiten Fenster ist ein schmaler Streifen zwischen
+    // zwei schwarzen Flächen. Der Rahmen richtet sich deshalb nach dem Video.
+    $("#schau").dataset.hoch = video.hoehe > video.breite ? "ja" : "";
     const abspieler = $("#schau-video");
     abspieler.src = "/medien/" + video.film;
     if (video.poster) abspieler.poster = "/medien/" + video.poster;
+
+    postingZeigen(video);
 
     const fassungen = Object.values(video.fassungen || {})
       .filter((f) => f.kennung !== "poster");
@@ -200,6 +211,56 @@
 
     $("#schau").showModal();
     abspieler.play().catch(() => { /* der Benutzer startet dann von Hand */ });
+  }
+
+  /* ── Posting-Text ───────────────────────────────────────────────────────
+   *
+   * Ein fertiges Video ist nur die halbe Arbeit — danach fehlen noch Titel, Text und
+   * Hashtags, und genau daran bleibt man beim Hochladen hängen. Das Sprachmodell hat
+   * beides beim Drehbuch ohnehin geschrieben; hier steht es zum Kopieren bereit.
+   * Videos aus älteren Fassungen haben es nicht — dann bleibt der Bereich verborgen.
+   */
+  function postingZeigen(video) {
+    const bereich = $("#schau-posting");
+    const posting = video.posting || {};
+    const text = (posting.text || "").trim();
+    const tags = posting.hashtags || [];
+
+    if (!text && !tags.length) {
+      bereich.hidden = true;
+      bereich.replaceChildren();
+      return;
+    }
+
+    const zumKopieren = [video.titel, "", text, "",
+                         tags.map((w) => "#" + w).join(" ")]
+      .join("\n").replace(/\n{3,}/g, "\n\n").trim();
+
+    bereich.hidden = false;
+    bereich.replaceChildren(
+      el("div", { klasse: "schau-posting-kopf" }, [
+        el("span", { klasse: "schau-posting-name", text: "Zum Veröffentlichen" }),
+        el("button", {
+          klasse: "knopf knopf-mini", type: "button",
+          title: "Titel, Text und Hashtags kopieren",
+          onclick: () => kopieren(zumKopieren),
+        }, [icon("kopieren"), " Kopieren"]),
+      ]),
+      el("p", { klasse: "schau-posting-text", text }),
+      ...(tags.length
+        ? [el("p", { klasse: "schau-posting-tags",
+                     text: tags.map((w) => "#" + w).join(" ") })]
+        : []),
+    );
+  }
+
+  async function kopieren(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      MPW.melden("In die Zwischenablage kopiert.", "erfolg", 2000);
+    } catch (fehler) {
+      MPW.melden("Kopieren hat nicht geklappt.", "fehler");
+    }
   }
 
   function schliessen() {

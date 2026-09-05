@@ -205,11 +205,36 @@ Zustandswechsel geht als Ereignis an die Oberfläche:
 | `uebergang` | der wandernde Punkt auf der Verbindung |
 | `startbild` | Vorschaubild im Bild-Block |
 | `auftrag` | gestartet · fertig · fehler · abgebrochen |
+| `warteschlange` | eingereiht · entfernt · geleert |
+| `szene_ausgefallen` | eine Szene hat es nicht geschafft, der Film entsteht ohne sie |
 | `bibliothek` | Bestand hat sich geändert |
 
-**Ein Auftrag zur Zeit.** `pipeline._aktuell` ist die Sperre; ein zweiter Start wirft
-einen `EingabeFehler`. Das schützt vor doppelten Kosten und vor zwei Aufträgen, die sich
-um dieselben Dateien streiten.
+**Ein Auftrag zur Zeit — aber eine Reihe dahinter.** `pipeline._aktuell` ist die Sperre.
+Zwei gleichzeitige Läufe würden sich um dieselben Dateien streiten und wären zusammen
+keine Sekunde schneller; bei Higgsfield steht ohnehin eine Warteschlange.
+
+Es gibt deshalb zwei Eingänge:
+
+| Funktion | Verhalten, wenn schon etwas läuft |
+|---|---|
+| `pipeline.starten()` | wirft `EingabeFehler` — für alles, was jetzt laufen muss oder gar nicht |
+| `pipeline.einreihen()` | stellt an (höchstens `MAX_SCHLANGE` = 10) und gibt `(auftrag, gestartet)` zurück |
+
+Die Route `POST /api/auftrag` nimmt `einreihen`. Nach jedem Lauf holt `_bearbeiten` im
+`finally` den nächsten Wartenden herein (`_naechsten_starten`) — außerhalb der Sperre,
+denn die ist nicht wiedereintrittsfähig. Wer inzwischen aus der Reihe genommen wurde,
+wird übersprungen; ein Fehler beim Nachrücken kann den Arbeitsfaden nicht mitreißen.
+
+**Der Ausfall einer Szene beendet den Lauf nicht.** Bezahlte Clips wegzuwerfen, weil
+eine von fünf Szenen die Moderation nicht passiert hat, war der teuerste Ausgang, den
+das Programm kannte. Unterschieden wird jetzt:
+
+* `GuthabenFehler`, `ZugangFehler`, `KonfigurationsFehler` und `AbbruchFehler` beenden
+  den Lauf sofort — die nächste Szene liefe in dieselbe Wand (`pipeline._TOEDLICH`);
+* alles andere überspringt nur diese Szene. Ist am Ende keine einzige entstanden,
+  scheitert der Auftrag mit dem Grund der letzten.
+
+Was fehlt, steht in `ergebnis["ausgefallen"]`, im Logbuch und auf dem Block „Higgsfield“.
 
 **Abbruch** läuft über ein `threading.Event`, das jeder wartende Aufruf prüft — auch
 mitten im ffmpeg-Lauf und mitten im Polling. Wartende Higgsfield-Aufträge werden
@@ -358,8 +383,8 @@ nicht mehr auf die Umgebung. (`run.py:voraussetzungen_melden`)
 ## 7. Tests
 
 ```
-python -m pytest tests/ -q                    # 229 Tests, rund 2 Minuten
-python -m pytest tests/ -q -m "not langsam"   # 217, ohne echte ffmpeg-Läufe, ~5 Sekunden
+python -m pytest tests/ -q                    # 251 Tests, rund 2,5 Minuten
+python -m pytest tests/ -q -m "not langsam"   # 234, ohne echte ffmpeg-Läufe, ~5 Sekunden
 ```
 
 | Datei | Inhalt |
@@ -367,10 +392,10 @@ python -m pytest tests/ -q -m "not langsam"   # 217, ohne echte ffmpeg-Läufe, ~
 | `test_fundament.py` | Konfiguration, Fehlerübersetzung, Logbuch, Maskierung |
 | `test_higgsfield.py` | API-Client mit Attrappen: Polling, Abbruch, alle Fehlerarten |
 | `test_promptsmith.py` | JSON-Bergung, fremde Feldnamen, Notbehelf, Dateinamen |
-| `test_media.py` | Formatvorgaben, Dateiangaben, echte ffmpeg-Läufe |
-| `test_pipeline.py` | Auftragsspeicher, Eingabeprüfung, Pfadsicherheit, Bibliothek |
+| `test_media.py` | Formatvorgaben, Dateiangaben, **Montageraster**, echte ffmpeg-Läufe |
+| `test_pipeline.py` | Auftragsspeicher, Eingabeprüfung, Pfadsicherheit, Bibliothek, **Warteschlange** |
 | `test_updater.py` | Nur-Vorspulen, Sperre während eines Auftrags, Neustart |
-| `test_videoquelle.py` | Wahl des Videowegs, Guthabengedächtnis, Abo-Anmeldung, **Übersetzung der Modellnamen** |
+| `test_videoquelle.py` | Wahl des Videowegs, Guthabengedächtnis, Abo-Anmeldung, **Übersetzung der Modellnamen**, **Übergabe des Startbildes (`medias`)** |
 | `test_kopfzeile.py` | Beschriftungen und Ampelfarben über die echten Routen |
 | `test_ende_zu_ende.py` | **die ganze Kette** mit Higgsfield-Attrappe |
 
@@ -388,6 +413,13 @@ Dienst hätte er zum `unknown model` gebracht. Ein Test, der die Annahme mitmach
 prüfen sollte, prüft nichts. `test_bild_schickt_nie_einen_platformnamen` schließt
 wenigstens die eine Lücke, die aufgefallen ist: Was die Ablaufsteuerung hineingibt, darf
 so nicht hinausgehen.
+
+Am 05.09.2026 hat dieselbe Lücke ein zweites Mal zugeschlagen, eine Schnittstelle
+weiter: Die Attrappe nahm auch `image_url` an, der echte Dienst verlangt `medias`.
+`test_startbild_geht_als_medias_hinaus_nie_als_adresse` hält das jetzt fest — und zwar
+in beide Richtungen, also auch, dass **keine** rohe Adresse mehr hinausgeht. Das Muster
+dahinter lohnt die Verallgemeinerung: **Jede Annahme über eine fremde Schnittstelle
+gehört als Zusicherung in einen Test, nicht nur in einen Kommentar.**
 
 ---
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -300,3 +301,157 @@ def test_formate_der_bibliothek_kennt_die_pipeline():
     können — sonst gäbe es Formate, die nur auf einem Weg entstehen."""
     for kennung in media.STANDARDFORMATE:
         assert kennung in media.FORMATE
+
+
+# ── Warteschlange ────────────────────────────────────────────────────────────
+#
+# „Ein Auftrag zur Zeit" bleibt richtig — zwei gleichzeitige Läufe würden sich um
+# dieselben Dateien streiten und wären zusammen keine Sekunde schneller. Falsch war
+# nur die Folge daraus: Wer einen zweiten Clip bestellen wollte, bekam einen Fehler
+# und musste danebensitzen. Jetzt wird eingereiht.
+#
+# Die Tests fassen `_bearbeiten` bewusst NICHT an, sondern lassen den echten Ablauf
+# an seinem ersten Schritt stolpern. Nur so läuft auch der `finally`-Zweig mit — und
+# genau dort holt sich das Programm den nächsten Wartenden herein.
+
+@pytest.fixture
+def reihe_frei(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    jobstore.einrichten()
+    pipeline._aktuell = None
+    pipeline._schlange.clear()
+    yield
+    # Erst die Reihe leeren, dann den laufenden Faden auslaufen lassen: Sonst greift
+    # er noch auf die Datenbank dieses Tests zu, die es gleich nicht mehr gibt.
+    pipeline._schlange.clear()
+    laeuft = pipeline._aktuell
+    if laeuft is not None:
+        laeuft.abbruch.set()
+        laeuft.faden.join(timeout=10)
+    pipeline._aktuell = None
+
+
+def _stolpern_lassen(monkeypatch, bearbeitet: list, tor=None):
+    """Lässt jeden Auftrag sofort (oder beim Öffnen des Tors) scheitern."""
+    def erster_schritt(auftrag_id, _e, _abbruch):
+        bearbeitet.append(auftrag_id)
+        if tor is not None:
+            tor.wait(8)
+        raise errors.AnbieterFehler("Nur ein Test.", "", ursprung="Test")
+
+    monkeypatch.setattr(pipeline, "_schritt_briefing_und_claude", erster_schritt)
+
+
+def _warten_bis(bedingung, sekunden: float = 8.0) -> bool:
+    frist = time.monotonic() + sekunden
+    while time.monotonic() < frist:
+        if bedingung():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_zweiter_auftrag_stellt_sich_an(reihe_frei, monkeypatch):
+    tor = threading.Event()
+    bearbeitet: list[str] = []
+    _stolpern_lassen(monkeypatch, bearbeitet, tor)
+
+    erster, sofort = pipeline.einreihen({"briefing": "Der erste Auftrag"})
+    assert sofort is True
+    assert _warten_bis(lambda: bearbeitet == [erster.id])
+
+    zweiter, sofort = pipeline.einreihen({"briefing": "Der zweite Auftrag"})
+    assert sofort is False
+
+    reihe = pipeline.warteschlange()
+    assert [e["id"] for e in reihe] == [zweiter.id]
+    assert reihe[0]["platz"] == 1
+    assert pipeline.laeuft_gerade() == erster.id
+    tor.set()
+
+
+def test_starten_bleibt_streng(reihe_frei, monkeypatch):
+    """`starten` ist weiterhin der Weg für „jetzt oder gar nicht" — nur `einreihen`
+    stellt an. Wer auf den Fehler baut, soll ihn weiter bekommen."""
+    tor = threading.Event()
+    bearbeitet: list[str] = []
+    _stolpern_lassen(monkeypatch, bearbeitet, tor)
+
+    pipeline.starten({"briefing": "Der erste Auftrag"})
+    assert _warten_bis(lambda: len(bearbeitet) == 1)
+
+    with pytest.raises(errors.EingabeFehler):
+        pipeline.starten({"briefing": "Der zweite Auftrag"})
+    assert pipeline.warteschlange() == []
+    tor.set()
+
+
+def test_wartender_auftrag_startet_von_selbst(reihe_frei, monkeypatch):
+    """Der eigentliche Zweck: Nach dem ersten läuft der zweite ohne Zutun an."""
+    tor = threading.Event()
+    bearbeitet: list[str] = []
+    _stolpern_lassen(monkeypatch, bearbeitet, tor)
+
+    erster, _ = pipeline.einreihen({"briefing": "Der erste Auftrag"})
+    assert _warten_bis(lambda: len(bearbeitet) == 1)
+    zweiter, sofort = pipeline.einreihen({"briefing": "Der zweite Auftrag"})
+    assert sofort is False
+
+    tor.set()
+    assert _warten_bis(lambda: bearbeitet == [erster.id, zweiter.id]), bearbeitet
+    assert pipeline.warteschlange() == []
+
+
+def test_aus_der_reihe_genommener_auftrag_laeuft_nicht_an(reihe_frei, monkeypatch):
+    """Wer zurückzieht, soll nicht doch bezahlen — der Eintrag darf nie starten."""
+    tor = threading.Event()
+    bearbeitet: list[str] = []
+    _stolpern_lassen(monkeypatch, bearbeitet, tor)
+
+    erster, _ = pipeline.einreihen({"briefing": "Der erste Auftrag"})
+    assert _warten_bis(lambda: len(bearbeitet) == 1)
+    zweiter, _ = pipeline.einreihen({"briefing": "Der zweite Auftrag"})
+
+    assert pipeline.aus_warteschlange(zweiter.id) is True
+    tor.set()
+    assert _warten_bis(lambda: pipeline.laeuft_gerade() == "")
+    time.sleep(0.4)
+
+    assert bearbeitet == [erster.id]
+    assert jobstore.holen(zweiter.id).zustand == jobstore.ABGEBROCHEN
+
+
+def test_die_reihe_hat_eine_grenze(reihe_frei, monkeypatch):
+    """Jeder Eintrag kostet später Guthaben. Eine Liste, die niemand mehr überblickt,
+    ist der sicherste Weg, versehentlich zwanzig Videos zu bestellen."""
+    tor = threading.Event()
+    bearbeitet: list[str] = []
+    _stolpern_lassen(monkeypatch, bearbeitet, tor)
+    monkeypatch.setattr(pipeline, "MAX_SCHLANGE", 2)
+
+    pipeline.einreihen({"briefing": "Der laufende Auftrag"})
+    assert _warten_bis(lambda: len(bearbeitet) == 1)
+    pipeline.einreihen({"briefing": "Wartender eins"})
+    pipeline.einreihen({"briefing": "Wartender zwei"})
+
+    with pytest.raises(errors.EingabeFehler) as info:
+        pipeline.einreihen({"briefing": "Einer zu viel"})
+    assert "warten bereits" in info.value.meldung
+    tor.set()
+
+
+def test_reihe_leeren_laesst_den_laufenden_in_ruhe(reihe_frei, monkeypatch):
+    tor = threading.Event()
+    bearbeitet: list[str] = []
+    _stolpern_lassen(monkeypatch, bearbeitet, tor)
+
+    laufender, _ = pipeline.einreihen({"briefing": "Der laufende Auftrag"})
+    assert _warten_bis(lambda: len(bearbeitet) == 1)
+    pipeline.einreihen({"briefing": "Wartender eins"})
+    pipeline.einreihen({"briefing": "Wartender zwei"})
+
+    assert pipeline.warteschlange_leeren() == 2
+    assert pipeline.warteschlange() == []
+    assert pipeline.laeuft_gerade() == laufender.id
+    tor.set()
+

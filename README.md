@@ -121,6 +121,22 @@ anhaken. Darunter steht immer der Text, der gleich an Claude geht — keine Übe
 arbeitet Claude Ihren Text noch zu einem Profi-Prompt aus. Mit dem Häkchen
 „Wörtlich verwenden“ geht er unverändert an Higgsfield.
 
+**Wohin soll das Video?** — die wichtigste Einstellung, und deshalb die erste.
+
+| Auswahl | Was sie einstellt |
+|---|---|
+| TikTok / Reels | 9:16 hochkant · 4 Szenen à 5 s · rund 20 Sekunden |
+| YouTube Shorts | 9:16 hochkant · 6 Szenen à 5 s · rund 30 Sekunden |
+| Instagram-Feed | 1:1 quadratisch · 3 Szenen à 5 s · rund 15 Sekunden |
+| YouTube / Webseite | 16:9 breit · 5 Szenen à 5 s · rund 25 Sekunden |
+
+Ein Klick setzt Bildformat, Länge, Szenenzahl **und** die Ausgabefassungen. Jede
+einzelne Einstellung lässt sich hinterher unter „Weitere Einstellungen“ überstimmen.
+
+Das Bildformat geht dabei auch an Claude: Bei 9:16 schreibt es senkrechte Bildprompts
+mit dem Motiv in der Mitte statt breiter Panoramen — und achtet darauf, dass die erste
+Szene sofort etwas zeigt. Bei TikTok entscheidet die erste Sekunde.
+
 **Länge**
 
 | Einstellung | Ergebnis |
@@ -131,6 +147,13 @@ arbeitet Claude Ihren Text noch zu einem Profi-Prompt aus. Mit dem Häkchen
 Der Storyboard-Modus ist der einzige Weg zu Videos über zehn Sekunden: kein
 Higgsfield-Modell liefert längere Clips am Stück. Fünf Szenen à fünf Sekunden ergeben
 rund 25 Sekunden Film — und fünf Aufträge bei Higgsfield.
+
+**Mehrere Videos hintereinander.** Es läuft immer nur ein Auftrag — zwei gleichzeitig
+wären zusammen keine Sekunde schneller. Sie müssen aber nicht danebensitzen: Klicken
+Sie einfach wieder auf „Video erzeugen“, dann stellt sich der Auftrag an und startet
+von selbst, sobald der vorige fertig ist. Die Wartenden stehen unter dem Startknopf
+und lassen sich mit dem × einzeln wieder herausnehmen. Höchstens zehn — jeder
+kostet später Guthaben.
 
 ### Rechts oben: Der Ablauf
 
@@ -164,6 +187,11 @@ ohne neues Guthaben, denn das rechnet Ihr Rechner selbst aus.
 | Web | Kleine Datei zum Einbetten — 1280×720 |
 | GIF | Endlosschleife ohne Ton, erste 8 Sekunden |
 
+**Text zum Veröffentlichen.** Beim Abspielen steht unter dem Video ein fertiger
+Vorschlag: Titel, Bildunterschrift und Hashtags. „Kopieren“ legt alles in die
+Zwischenablage — beim Hochladen bei TikTok oder Instagram nur noch einfügen.
+Dasselbe liegt als `posting.txt` im Videoordner.
+
 ---
 
 ## Wo die Videos liegen
@@ -177,6 +205,7 @@ output/2026-08-03_werbung_baeckerei_a1b2c3/
 ├── film_hoch.mp4       ← die erzeugten Fassungen
 ├── szene_01.mp4        ← die Einzelszenen
 ├── szene_01_start.jpg  ← die Startbilder
+├── posting.txt         ← Titel, Text und Hashtags zum Veröffentlichen
 └── auftrag.json        ← Briefing und Drehbuch zum Nachlesen
 ```
 

@@ -95,8 +95,10 @@ def anwendung_bauen() -> Flask:
             "bloecke": [{"kennung": b, "name": jobstore.BLOCKNAMEN[b]}
                         for b in jobstore.BLOECKE],
             "grenzen": {"max_szenen": config.MAX_SCENES,
-                        "max_briefing": config.MAX_BRIEFING_CHARS},
+                        "max_briefing": config.MAX_BRIEFING_CHARS,
+                        "max_warteschlange": pipeline.MAX_SCHLANGE},
             "laufender_auftrag": pipeline.laeuft_gerade(),
+            "warteschlange": pipeline.warteschlange(),
         })
 
     @app.get("/api/zustand")
@@ -108,6 +110,7 @@ def anwendung_bauen() -> Flask:
             "laufender_auftrag": pipeline.laeuft_gerade(),
             "auftrag": laufend.als_dict() if laufend else None,
             "letzte": [a.als_dict() for a in jobstore.liste(grenze=8)],
+            "warteschlange": pipeline.warteschlange(),
         })
 
     @app.post("/api/selbsttest")
@@ -194,9 +197,35 @@ def anwendung_bauen() -> Flask:
 
     @app.post("/api/auftrag")
     def auftrag_starten():
+        """Nimmt einen Auftrag an. Läuft schon einer, stellt sich dieser an.
+
+        Ein zweiter Klick war früher schlicht ein Fehler. Für eine Serie — mehrere
+        Clips an einem Nachmittag — hieß das: danebensitzen und warten. Jetzt wird
+        eingereiht; die Antwort sagt, ob der Auftrag läuft oder ansteht.
+        """
         daten = request.get_json(silent=True) or {}
-        auftrag = pipeline.starten(daten)
-        return gut({"auftrag": auftrag.als_dict()}, 202)
+        auftrag, sofort = pipeline.einreihen(daten)
+        return gut({"auftrag": auftrag.als_dict(), "gestartet": sofort,
+                    "warteschlange": pipeline.warteschlange()}, 202)
+
+    @app.get("/api/warteschlange")
+    def warteschlange_holen():
+        return gut({"warteschlange": pipeline.warteschlange(),
+                    "laufender_auftrag": pipeline.laeuft_gerade(),
+                    "grenze": pipeline.MAX_SCHLANGE})
+
+    @app.delete("/api/warteschlange/<kennung>")
+    def warteschlange_eintrag_loeschen(kennung: str):
+        if not pipeline.aus_warteschlange(kennung):
+            raise errors.EingabeFehler(
+                "Dieser Auftrag wartet nicht (mehr).",
+                "Vermutlich läuft er bereits oder ist schon fertig.", ursprung=QUELLE)
+        return gut({"warteschlange": pipeline.warteschlange()})
+
+    @app.delete("/api/warteschlange")
+    def warteschlange_leeren():
+        return gut({"entfernt": pipeline.warteschlange_leeren(),
+                    "warteschlange": pipeline.warteschlange()})
 
     @app.get("/api/auftrag/<kennung>")
     def auftrag_holen(kennung: str):

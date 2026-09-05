@@ -230,7 +230,71 @@ def briefing_bauen(thema_kennung: str, betreff: str, argumente: list[str],
     return text.strip()
 
 
+# ── Zielplattformen ──────────────────────────────────────────────────────────
+#
+# Was ein Video für TikTok von einem für YouTube unterscheidet, sind vier Zahlen:
+# Bildformat, Länge, Szenenzahl und die Ausgabefassungen. Wer das jedes Mal einzeln
+# in „Weitere Einstellungen“ zusammensuchen muss, wählt am Ende doch 16:9 — und lädt
+# ein Breitbildvideo bei TikTok hoch.
+#
+# Die Plattform steht deshalb **vor** dem Thema und setzt alle vier auf einmal.
+# Überstimmen lässt sich hinterher jede einzelne.
+
+PLATTFORMEN = [
+    {
+        "kennung": "tiktok",
+        "name": "TikTok / Reels",
+        "beschreibung": "Hochkant, kurz, Aufhänger in der ersten Sekunde",
+        "seitenverhaeltnis": "9:16",
+        "szenen": 4,
+        "sekunden": 5,
+        "formate": ["hoch"],
+        "hinweis": "9:16 · rund 20 Sekunden — die Länge, die auf TikTok und Reels "
+                   "am zuverlässigsten zu Ende gesehen wird.",
+    },
+    {
+        "kennung": "shorts",
+        "name": "YouTube Shorts",
+        "beschreibung": "Hochkant, etwas mehr Erzählraum",
+        "seitenverhaeltnis": "9:16",
+        "szenen": 6,
+        "sekunden": 5,
+        "formate": ["hoch"],
+        "hinweis": "9:16 · rund 30 Sekunden. Shorts verträgt mehr Aufbau als TikTok.",
+    },
+    {
+        "kennung": "feed",
+        "name": "Instagram-Feed",
+        "beschreibung": "Quadratisch, für die Zeitleiste",
+        "seitenverhaeltnis": "1:1",
+        "szenen": 3,
+        "sekunden": 5,
+        "formate": ["quadrat"],
+        "hinweis": "1:1 · rund 15 Sekunden — im Feed wird ohne Ton und im Vorbeiscrollen "
+                   "geschaut.",
+    },
+    {
+        "kennung": "youtube",
+        "name": "YouTube / Webseite",
+        "beschreibung": "Breitbild, für den großen Bildschirm",
+        "seitenverhaeltnis": "16:9",
+        "szenen": 5,
+        "sekunden": 5,
+        "formate": ["breit", "web"],
+        "hinweis": "16:9 · rund 25 Sekunden. Dazu entsteht eine kleine Webfassung "
+                   "zum Einbetten.",
+    },
+]
+
+
+def plattform(kennung: str) -> dict | None:
+    for eintrag in PLATTFORMEN:
+        if eintrag["kennung"] == kennung:
+            return eintrag
+    return None
+
+
 def katalog() -> dict:
     """Alles, was die Oberfläche zum Aufbau des Formulars braucht."""
     return {"themen": THEMEN, "argumentgruppen": ARGUMENTGRUPPEN,
-            "zusatzfelder": ZUSATZFELDER}
+            "zusatzfelder": ZUSATZFELDER, "plattformen": PLATTFORMEN}

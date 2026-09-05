@@ -15,12 +15,14 @@
 
   const zustand = {
     thema: "",
+    ziel: "",                 // Zielplattform: tiktok, shorts, feed, youtube
     argumente: new Set(),
     modus: "formular",
     laenge: "einzel",
     videomodelle: [],
     formate: [],
     katalog: null,
+    briefing: "",             // der zuletzt gebaute Briefingtext
   };
 
   MPW.formular = { aufbauen, sammeln, sperren, zustand };
@@ -32,6 +34,7 @@
     zustand.videomodelle = start.videomodelle;
     zustand.formate = start.formate;
 
+    zieleBauen(start.katalog.plattformen || []);
     themenBauen(start.katalog.themen);
     argumenteBauen(start.katalog.argumentgruppen);
     modelleBauen(start.videomodelle);
@@ -42,6 +45,76 @@
 
     wiederherstellen();
     briefingErneuern();
+  }
+
+  /* ── Zielplattform ──────────────────────────────────────────────────────
+   *
+   * Was ein TikTok-Video von einem YouTube-Video unterscheidet, sind vier Zahlen:
+   * Bildformat, Szenenzahl, Clipdauer und die Ausgabefassungen. Sie einzeln unter
+   * „Weitere Einstellungen“ zusammenzusuchen hat in der Praxis dazu geführt, dass
+   * am Ende doch 16:9 eingestellt blieb — und ein Breitbildvideo bei TikTok landete.
+   * Ein Klick setzt jetzt alle vier. Überstimmen lässt sich hinterher jede einzelne.
+   */
+  function zieleBauen(plattformen) {
+    const behaelter = $("#ziele");
+    if (!behaelter || !plattformen.length) return;
+    behaelter.style.gridTemplateColumns = `repeat(${plattformen.length}, 1fr)`;
+    behaelter.replaceChildren(...plattformen.map((ziel) =>
+      el("button", {
+        klasse: "ziel",
+        type: "button",
+        role: "radio",
+        "aria-checked": "false",
+        title: ziel.beschreibung,
+        daten: { ziel: ziel.kennung },
+        onclick: () => zielWaehlen(ziel.kennung),
+      }, [
+        // Ein Miniaturrahmen im Zielformat statt eines Symbols: Er zeigt unmittelbar,
+        // welche Form das Video bekommt — und das ist die eigentliche Entscheidung.
+        el("span", {
+          klasse: "ziel-rahmen",
+          style: "aspect-ratio: " + ziel.seitenverhaeltnis.replace(":", " / "),
+        }),
+        el("span", { text: ziel.name }),
+        el("span", { klasse: "ziel-format", text: ziel.seitenverhaeltnis }),
+      ])));
+  }
+
+  function zielWaehlen(kennung, nurMarkieren) {
+    zustand.ziel = kennung;
+    for (const knopf of $$(".ziel")) {
+      const an = knopf.dataset.ziel === kennung;
+      knopf.classList.toggle("ist-an", an);
+      knopf.setAttribute("aria-checked", an ? "true" : "false");
+    }
+
+    const ziel = (zustand.katalog.plattformen || []).find((p) => p.kennung === kennung);
+    if (!ziel) return;
+    $("#ziel-hinweis").textContent = ziel.hinweis || "";
+    // Beim Wiederherstellen wird nur markiert: sonst überschriebe die Plattform die
+    // Einstellungen, die der Benutzer beim letzten Mal von Hand geändert hat.
+    if (nurMarkieren) return;
+
+    $("#verhaeltnis").value = ziel.seitenverhaeltnis;
+    $("#clipdauer").value = String(ziel.sekunden);
+    if (!$("#clipdauer").value) $("#clipdauer").selectedIndex = 0;
+
+    if (ziel.szenen > 1) {
+      laengeWaehlen("story");
+      $("#szenen").value = Math.min(ziel.szenen, Number($("#szenen").max));
+      $("#szenen-wert").value = $("#szenen").value;
+    } else {
+      laengeWaehlen("einzel");
+    }
+
+    // Die Ausgabefassungen gleich mit: Wer für TikTok erzeugt, will die 9:16-Fassung
+    // und nicht drei Fassungen, von denen zwei niemand braucht.
+    for (const kaestchen of $$("#formatwahl input")) {
+      kaestchen.checked = (ziel.formate || []).includes(kaestchen.value);
+    }
+
+    laengeHinweisErneuern();
+    merken();
   }
 
   function themenBauen(themen) {
@@ -77,9 +150,15 @@
 
     // Die Voreinstellung des Themas übernehmen — ein Social-Clip ist eben hochkant
     // und kurz, ein Markenfilm quer und länger. Der Benutzer kann alles überstimmen.
+    //
+    // Die Zielplattform steht dabei über dem Thema: Sie ist die ausdrückliche Wahl
+    // „das geht auf TikTok“, das Thema nur die Sorte Video. Wer beides setzt, will
+    // nicht, dass ein Themenwechsel sein Hochformat wieder auf Breitbild dreht.
     const vorschlag = thema.vorschlag || {};
-    if (vorschlag.seitenverhaeltnis) $("#verhaeltnis").value = vorschlag.seitenverhaeltnis;
-    if (vorschlag.szenen > 1) {
+    if (vorschlag.seitenverhaeltnis && !zustand.ziel) {
+      $("#verhaeltnis").value = vorschlag.seitenverhaeltnis;
+    }
+    if (vorschlag.szenen > 1 && !zustand.ziel) {
       laengeWaehlen("story");
       $("#szenen").value = Math.min(vorschlag.szenen, Number($("#szenen").max));
       $("#szenen-wert").value = $("#szenen").value;
@@ -273,6 +352,7 @@
     if (zustand.modus !== "formular") return;
     const feld = $("#briefing-vorschau");
     if (!zustand.thema && !$("#betreff").value.trim()) {
+      zustand.briefing = "";
       feld.textContent = "Thema wählen und kurz beschreiben, worum es geht.";
       return;
     }
@@ -286,9 +366,14 @@
           botschaft: wertVon("botschaft"),
         },
       });
-      feld.textContent = antwort.briefing || "—";
+      zustand.briefing = antwort.briefing || "";
+      feld.textContent = zustand.briefing || "—";
     } catch (fehler) {
-      feld.textContent = "Vorschau gerade nicht möglich.";
+      // Den letzten guten Text NICHT verwerfen: Er ist die Vorlage für den Auftrag.
+      // Vorher wurde der Briefingtext beim Start aus diesem Feld zurückgelesen — ein
+      // Aussetzer hier hätte also „Vorschau gerade nicht möglich.“ ins Video gebracht.
+      feld.textContent = zustand.briefing ||
+        "Vorschau gerade nicht möglich. Bitte kurz warten.";
     }
   }, 260);
 
@@ -318,9 +403,10 @@
       };
     }
 
-    const briefing = $("#briefing-vorschau").textContent.trim();
     if (!zustand.thema) throw new Error("Bitte zuerst ein Thema auswählen.");
     if (!$("#betreff").value.trim()) throw new Error("Bitte kurz beschreiben, worum es geht.");
+    const briefing = zustand.briefing.trim();
+    if (!briefing) throw new Error("Das Briefing ist noch nicht fertig — bitte einen Moment.");
 
     return {
       modus: "formular", briefing, szenen, sekunden,
@@ -367,6 +453,7 @@
   const merken = MPW.entprellen(function () {
     MPW.speicher.schreiben("formular", {
       thema: zustand.thema,
+      ziel: zustand.ziel,
       betreff: $("#betreff").value,
       argumente: Array.from(zustand.argumente),
       modus: zustand.modus,
@@ -386,10 +473,15 @@
   function wiederherstellen() {
     const gemerkt = MPW.speicher.lesen("formular", null);
     if (!gemerkt) {
+      // Beim allerersten Start: TikTok/Reels ist die häufigste Absicht — und das
+      // Format, bei dem eine falsche Voreinstellung am meisten kostet.
+      const erste = (zustand.katalog.plattformen || [])[0];
+      if (erste) zielWaehlen(erste.kennung);
       themaWaehlen(zustand.katalog.themen[0].kennung);
       return;
     }
 
+    if (gemerkt.ziel) zielWaehlen(gemerkt.ziel, true);
     themaWaehlen(gemerkt.thema || zustand.katalog.themen[0].kennung);
     $("#betreff").value = gemerkt.betreff || "";
     $("#freitext").value = gemerkt.freitext || "";

@@ -128,6 +128,12 @@
 
         <!-- ── Gemeinsame Einstellungen ── -->
         <fieldset class="feldgruppe">
+          <legend>Wohin soll das Video?</legend>
+          <div class="ziele" id="ziele" role="radiogroup" aria-label="Zielplattform"></div>
+          <p class="hinweis" id="ziel-hinweis"></p>
+        </fieldset>
+
+        <fieldset class="feldgruppe">
           <legend>Länge</legend>
           <div class="segment" role="radiogroup" aria-label="Art des Videos">
             <button class="segment-knopf ist-an" type="button" data-laenge="einzel"
@@ -192,6 +198,7 @@
           <span>Abbrechen</span>
         </button>
         <p class="startzeile" id="startzeile">Bereit.</p>
+        <div class="reihe" id="reihe" hidden></div>
       </div>
     </div>
   </section>
@@ -255,6 +262,7 @@
     </button>
   </div>
   <video id="schau-video" controls playsinline preload="metadata"></video>
+  <div class="schau-posting" id="schau-posting" hidden></div>
   <div class="schau-fuss" id="schau-fuss"></div>
 </dialog>
 

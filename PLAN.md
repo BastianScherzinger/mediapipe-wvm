@@ -146,7 +146,7 @@ Der Fortschritt steht in der Aufgabenliste dieser Sitzung.
 
 | # | Paket | Fertig, wenn | Stand |
 |---|---|---|---|
-| P13 | Echter Medien-Durchlauf | Ein Film aus echtem Higgsfield-Material liegt vor, Laufzeitschätzungen sind daran geeicht | **offen** — der erste Versuch beim Kunden brach an P21 ab |
+| P13 | Echter Medien-Durchlauf | Ein Film aus echtem Higgsfield-Material liegt vor, Laufzeitschätzungen sind daran geeicht | **offen** — zweimal an einer Schnittstellenannahme gescheitert (P21, P23) |
 | P14 | Videobereich | Kacheln sichtbar und anklickbar, der ganze Bereich rollt | fertig |
 | P15 | Glas und Ablauf | LED-Rand an den Glasboxen, Blöcke ohne Querlauf | fertig |
 | P16 | Update-Knopf | Neuer Stand und Neustart per Klick, gesperrt während eines Auftrags | fertig |
@@ -156,10 +156,19 @@ Der Fortschritt steht in der Aufgabenliste dieser Sitzung.
 | P20 | Kopfzeile | Jede Beschriftung ohne Erklärung verständlich, Ampel springt nicht um | fertig |
 | P21 | Abo-Weg beim Kunden | Modellnamen werden übersetzt statt durchgereicht, Fehler des MCP-Dienstes kommen im Klartext an, das Update braucht keine Änderung an der `.env` | fertig, 26.08.2026 |
 | P22 | Zugänge des Kunden | `ANTHROPIC_KEY` und `HIGGSFIELD_API_KEY` gehören dem Kunden, ein Sprachmodell ist auf seinem Rechner erreichbar | **offen** — siehe unten |
+| P23 | Startbild im Abo-Weg | `generate_video` bekommt das Startbild als `medias`-Kennung statt als Adresse, ein Ausfall kostet nicht den ganzen Film | fertig, 05.09.2026 |
+| P24 | Hochformat, das eines ist | Ein 9:16-Auftrag ergibt einen 9:16-Film, ein 9:16-Vorschaubild und eine 9:16-Kachel — vom Probelauf bis zur Bibliothek | fertig, 05.09.2026 |
+| P25 | Serientauglich für TikTok | Zielplattform setzt Format, Länge und Ausgabefassungen auf einen Klick; Aufträge lassen sich einreihen; Titel, Text und Hashtags entstehen mit | fertig, 05.09.2026 |
 
 **P21** entstand aus dem ersten echten Lauf beim Kunden. Ursache, Behebung und
 Prüfprotokoll stehen vollständig in
 [`docs/BEFUND_2026-08-26.md`](docs/BEFUND_2026-08-26.md).
+
+**P23 bis P25** entstanden aus dem zweiten Lauf beim Kunden und dem anschließenden
+Durchgang durch den gesamten Code. Der schwerste Fund war dabei nicht der Abbruch,
+sondern **P24**: Hochformat wurde seit jeher auf Breitbild montiert, ohne dass je eine
+Fehlermeldung erschien. Alles in
+[`docs/BEFUND_2026-09-05.md`](docs/BEFUND_2026-09-05.md).
 
 **P22 ist der einzige Punkt, den kein Update lösen kann** — er verlangt Handlungen an
 den Konten, nicht am Code:

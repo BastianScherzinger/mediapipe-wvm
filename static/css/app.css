@@ -658,12 +658,86 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
 }
 .thema.ist-an .thema-symbol { color: var(--akzent); }
 
+/* Zielplattform — die erste Entscheidung, und die einzige, die alle anderen
+   Einstellungen auf einmal setzt. Bewusst anders als die Themenkacheln: eine Reihe,
+   vier gleichwertige Felder, damit sie nicht als zweites Themenraster gelesen wird. */
+.ziele { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--a2); }
+.ziel {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 9px 6px;
+  background: rgba(0,0,0,.2);
+  border: 1px solid var(--rand);
+  border-radius: var(--rund-klein);
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.25;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--takt) var(--kurve), background var(--takt) var(--kurve),
+              color var(--takt) var(--kurve), transform var(--takt) var(--kurve);
+}
+.ziel:hover { border-color: var(--rand-hell); color: var(--text-2); transform: translateY(-1px); }
+.ziel:focus-visible { outline: 2px solid var(--akzent); outline-offset: 2px; }
+/* Der Miniaturrahmen: 18 px hoch, die Breite ergibt sich aus dem Seitenverhältnis.
+   Vier Zeichen (▲ ▮ ■ ▬) waren bei dieser Größe nicht auseinanderzuhalten — die Form
+   selbst ist unmissverständlich. */
+.ziel-rahmen {
+  height: 18px;
+  border: 1.5px solid var(--text-3);
+  border-radius: 3px;
+  transition: border-color var(--takt) var(--kurve);
+}
+.ziel-format {
+  font-family: var(--schrift-fest);
+  font-size: 10px;
+  letter-spacing: .04em;
+  color: var(--text-3);
+  opacity: .8;
+}
+.ziel.ist-an {
+  border-color: rgba(34,211,238,.45);
+  background: var(--akzent-schwach);
+  color: var(--text);
+}
+.ziel.ist-an .ziel-rahmen { border-color: var(--akzent); }
+.ziel.ist-an .ziel-format { color: var(--akzent); opacity: 1; }
+
 .argumentgruppe { margin-bottom: var(--a4); }
 .argumentgruppe:last-child { margin-bottom: 0; }
 .argumentgruppe-name {
   margin: 0 0 var(--a2);
   font-size: 11.5px;
   color: var(--text-3);
+}
+
+/* Posting-Text im Abspielfenster: Titel, Bildunterschrift, Hashtags — alles, was
+   beim Hochladen gebraucht wird, an einer Stelle und mit einem Klick kopierbar. */
+.schau-posting {
+  margin: var(--a3) 0 0;
+  padding: var(--a3);
+  background: rgba(0,0,0,.26);
+  border: 1px solid var(--rand);
+  border-left: 2px solid var(--akzent-tief);
+  border-radius: var(--rund-mini);
+}
+.schau-posting-kopf {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--a3);
+  margin-bottom: var(--a2);
+}
+.schau-posting-name {
+  font-size: 11px; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.schau-posting-text {
+  margin: 0;
+  font-size: 13px; line-height: 1.6; color: var(--text-2);
+  white-space: pre-wrap;
+}
+.schau-posting-tags {
+  margin: var(--a2) 0 0;
+  font-family: var(--schrift-fest);
+  font-size: 12px; line-height: 1.7; color: var(--akzent-2);
+  word-break: break-word;
 }
 
 .startleiste {
@@ -682,6 +756,34 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
 }
 .startzeile[data-art="fehler"] { color: var(--fehler); }
 .startzeile[data-art="erfolg"] { color: var(--erfolg); }
+
+/* Die Warteschlange: bewusst schmal und leise. Sie ist eine Auskunft, keine zweite
+   Bedienoberfläche — wer sie braucht, sieht sie; wer nur ein Video macht, nie. */
+.reihe { flex: 1 1 100%; display: flex; flex-direction: column; gap: var(--a1); }
+.reihe-zeile {
+  display: flex; align-items: center; gap: var(--a2);
+  padding: 5px 8px;
+  background: rgba(0,0,0,.24);
+  border: 1px solid var(--rand);
+  border-radius: var(--rund-mini);
+  font-size: 12px;
+  color: var(--text-3);
+}
+.reihe-platz {
+  flex: 0 0 auto;
+  min-width: 17px; height: 17px;
+  display: grid; place-items: center;
+  border-radius: 5px;
+  background: var(--akzent-schwach);
+  color: var(--akzent-2);
+  font-family: var(--schrift-fest);
+  font-size: 10px;
+}
+.reihe-titel {
+  flex: 1 1 auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-2);
+}
 
 /* ── 7  Ablauf ───────────────────────────────────────────────────────────── */
 .ablauf-glas { flex: 0 0 auto; }
@@ -945,6 +1047,19 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
   overflow: hidden;
 }
 .karte-bild img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Hochkante Videos: Ein 1080×1920-Bild in ein 16:9-Feld zu „covern“ heißt, 70 % des
+   Bildes wegzuschneiden — von einem TikTok-Clip bliebe ein Streifen aus der Mitte,
+   und in der Übersicht sähen alle Videos gleich aus. Deshalb wird das ganze Bild
+   gezeigt; dahinter steht eine unscharfe Kopie, damit die Kachel gefüllt bleibt
+   und die Reihe ruhig wirkt. */
+.karte-bild[data-hoch] img { object-fit: contain; position: relative; z-index: 1; }
+.karte-bild[data-hoch]::before {
+  content: "";
+  position: absolute; inset: -12px;
+  background: var(--kachel-grund) center / cover no-repeat;
+  filter: blur(18px) brightness(.5) saturate(.7);
+}
 .karte-bild-leer { display: grid; place-items: center; height: 100%; color: #333A44; }
 .karte-bild-leer .icon { width: 30px; height: 30px; }
 
@@ -1025,6 +1140,12 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
 /* ── 10  Fenster & Meldungen ─────────────────────────────────────────────── */
 .schau {
   width: min(1080px, 92vw);
+  /* Der Dialog rollt in sich, statt über den Bildschirmrand hinauszuwachsen. Ohne das
+     verschwand der Posting-Text bei hochkanten Videos unter der Kante. */
+  max-height: 92vh;
+  /* Kein `display` in der Grundregel! Es überschriebe `dialog:not([open])` des
+     Browsers, und der geschlossene Dialog stünde dauerhaft auf der Seite. */
+  flex-direction: column;
   padding: 0;
   border: 1px solid var(--rand);
   border-radius: var(--rund);
@@ -1040,7 +1161,27 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
   border-bottom: 1px solid var(--rand);
 }
 .schau-kopf h3 { font-size: 14px; font-weight: 600; }
-.schau video { display: block; width: 100%; max-height: 68vh; background: #000; }
+.schau[open] { display: flex; }
+/* Ein 9:16-Clip in einem 1080 px breiten Fenster wäre ein Streifen zwischen zwei
+   schwarzen Flächen — der Rahmen nimmt deshalb die Form des Videos an. */
+.schau[data-hoch="ja"] { width: min(430px, 92vw); }
+
+/* Kopf, Posting-Block und Fuß bekommen ihre natürliche Höhe; das Video nimmt, was
+   übrig bleibt. Feste Höhen für das Video hätten bei jedem längeren Posting-Text
+   dasselbe Problem erzeugt, nur an anderer Stelle. */
+.schau-kopf, .schau-fuss, .schau-posting { flex: 0 0 auto; }
+.schau video {
+  display: block;
+  flex: 1 1 auto; min-height: 180px;
+  width: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.schau-posting {
+  margin: 0;
+  border-radius: 0; border-left-width: 2px; border-right: 0; border-top: 0;
+  max-height: 30vh; overflow-y: auto;
+}
 .schau-fuss {
   display: flex; flex-wrap: wrap; gap: var(--a2);
   padding: var(--a3) var(--a4);

@@ -179,3 +179,63 @@ def test_hochformat_hat_genau_die_zielmasse(clip, tmp_path):
     daten = media.angaben(ziel)
     assert (daten.breite, daten.hoehe) == (1080, 1920)
     assert not list(tmp_path.glob("*.teil*"))        # keine Reste
+
+
+# ── Montageraster ────────────────────────────────────────────────────────────
+#
+# Vorher stand in `montieren` fest 1920×1080. Jeder Hochformat-Auftrag wurde damit
+# mittig auf Breitbild beschnitten, ohne dass irgendwo ein Fehler auftauchte — für
+# TikTok, Reels und Shorts war das Ergebnis unbrauchbar. Diese Tests halten fest,
+# dass sich die Montage nach dem Material richtet.
+
+def test_zielraster_folgt_dem_bestellten_format():
+    """Ohne messbares Material entscheidet die Bestellung — und zwar richtig."""
+    assert media.zielraster([], "9:16") == (1080, 1920)
+    assert media.zielraster([], "16:9") == (1920, 1080)
+    assert media.zielraster([], "1:1") == (1080, 1080)
+    assert media.zielraster([], "4:3") == (1440, 1080)
+    assert media.zielraster([], "3:4") == (1080, 1440)
+
+
+def test_zielraster_faellt_auf_breitbild_zurueck():
+    """Weder Material noch brauchbare Angabe: dann das gängigste Format."""
+    assert media.zielraster([], "") == (1920, 1080)
+    assert media.zielraster([], "Unsinn") == (1920, 1080)
+    assert media.zielraster([], "16:0") == (1920, 1080)
+
+
+@pytest.mark.skipif(not config.ffmpeg_pfad(), reason="kein ffmpeg")
+@pytest.mark.langsam
+def test_bestellung_schlaegt_das_material(tmp_path):
+    """Wer 9:16 bestellt hat, bekommt 9:16 — auch wenn das Modell Breitbild lieferte.
+
+    Andersherum wäre es fatal: Der Kunde lädt bei TikTok hoch, und das Video ist quer.
+    Der Beschnitt kostet Bildinhalt, aber ein unbrauchbares Format kostet mehr.
+    """
+    breit = media.platzhalter_clip(tmp_path / "breit.mp4", sekunden=1,
+                                   breite=1280, hoehe=720)
+    assert media.zielraster([breit], "9:16") == (1080, 1920)
+
+
+@pytest.mark.skipif(not config.ffmpeg_pfad(), reason="kein ffmpeg")
+@pytest.mark.langsam
+def test_ohne_bestellung_entscheidet_das_material(tmp_path):
+    """Ohne Vorgabe zählt, was da ist — dann wird nichts unnötig beschnitten."""
+    hoch = media.platzhalter_clip(tmp_path / "hoch.mp4", sekunden=1,
+                                  breite=1080, hoehe=1920)
+    assert media.zielraster([hoch], "") == (1080, 1920)
+
+
+@pytest.mark.skipif(not config.ffmpeg_pfad(), reason="kein ffmpeg")
+@pytest.mark.langsam
+def test_hochformat_bleibt_hochformat(tmp_path):
+    """Der eigentliche Regressionstest: aus zwei 9:16-Szenen wird ein 9:16-Film."""
+    a = media.platzhalter_clip(tmp_path / "a.mp4", sekunden=2, breite=1080, hoehe=1920)
+    b = media.platzhalter_clip(tmp_path / "b.mp4", sekunden=2, breite=1080, hoehe=1920)
+
+    film = media.montieren([a, b], tmp_path / "film.mp4", weiche_uebergaenge=False,
+                           seitenverhaeltnis="9:16")
+    daten = media.angaben(film)
+    assert daten.hoehe > daten.breite, "der Film ist im Querformat gelandet"
+    assert (daten.breite, daten.hoehe) == (1080, 1920)
+

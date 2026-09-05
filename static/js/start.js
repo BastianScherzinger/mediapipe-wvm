@@ -11,6 +11,7 @@
   const { $ } = MPW;
 
   let laufenderAuftrag = "";
+  let reihe = [];
 
   // `pruefen` heißt nach außen so, wie der Knopf beschriftet ist. Die Abo-Anmeldung
   // ruft es auf, damit die Lampen sofort den neuen Zugang zeigen.
@@ -44,6 +45,7 @@
 
     MPW.stromVerbinden();
     MPW.beiEreignis("auftrag", auftragsereignis);
+    MPW.beiEreignis("warteschlange", () => zustandAbgleichen());
     MPW.beiEreignis("verbunden", zustandAbgleichen);
 
     await zustandAbgleichen();
@@ -61,6 +63,7 @@
     try {
       const antwort = await MPW.hole("/api/zustand");
       laufenderAuftrag = antwort.laufender_auftrag || "";
+      reiheZeichnen(antwort.warteschlange || []);
       MPW.formular.sperren(Boolean(laufenderAuftrag));
       MPW.aktualisierung.auftragszustand(Boolean(laufenderAuftrag));
 
@@ -96,18 +99,68 @@
       return;
     }
 
-    MPW.formular.sperren(true);
-    zeile("Auftrag wird angenommen …");
-    MPW.ablauf.zuruecksetzen();
+    // Läuft schon etwas, wird dieser Auftrag eingereiht statt abgewiesen. Der Ablauf
+    // links darf dann NICHT zurückgesetzt werden — dort läuft ja noch der andere.
+    const stelltSichAn = Boolean(laufenderAuftrag);
+    if (!stelltSichAn) {
+      MPW.formular.sperren(true);
+      MPW.ablauf.zuruecksetzen();
+    }
+    zeile(stelltSichAn ? "Auftrag wird eingereiht …" : "Auftrag wird angenommen …");
 
     try {
       const antwort = await MPW.hole("/api/auftrag", { koerper: auftrag });
-      laufenderAuftrag = antwort.auftrag.id;
-      zeile("Läuft. Sie können das Fenster offen lassen.");
+      reiheZeichnen(antwort.warteschlange || []);
+      if (antwort.gestartet) {
+        laufenderAuftrag = antwort.auftrag.id;
+        zeile("Läuft. Sie können das Fenster offen lassen.");
+      } else {
+        const platz = (antwort.warteschlange || []).length;
+        zeile(`Eingereiht — Platz ${platz}. Startet von selbst, sobald der laufende ` +
+              "Auftrag fertig ist.", "erfolg");
+        MPW.melden("Auftrag eingereiht.", "erfolg", 3500);
+      }
     } catch (fehler) {
-      MPW.formular.sperren(false);
+      if (!stelltSichAn) MPW.formular.sperren(false);
       zeile(fehler.meldung || fehler.message, "fehler");
       MPW.melden(fehler.message, "fehler", 9000);
+    }
+  }
+
+  /* ── Warteschlange ──────────────────────────────────────────────────────
+   *
+   * Sie erscheint nur, wenn wirklich etwas ansteht. Wer ein einzelnes Video macht,
+   * soll von ihr nichts mitbekommen.
+   */
+  function reiheZeichnen(eintraege) {
+    reihe = eintraege || [];
+    const behaelter = MPW.$("#reihe");
+    if (!reihe.length) {
+      behaelter.hidden = true;
+      behaelter.replaceChildren();
+      return;
+    }
+    behaelter.hidden = false;
+    behaelter.replaceChildren(...reihe.map((eintrag) =>
+      MPW.el("div", { klasse: "reihe-zeile" }, [
+        MPW.el("span", { klasse: "reihe-platz", text: String(eintrag.platz) }),
+        MPW.el("span", { klasse: "reihe-titel", text: eintrag.titel || "Auftrag",
+                         title: eintrag.briefing || "" }),
+        MPW.el("button", {
+          klasse: "knopf knopf-mini", type: "button",
+          title: "Aus der Reihe nehmen", "aria-label": "Aus der Reihe nehmen",
+          onclick: () => ausReiheNehmen(eintrag.id),
+        }, [MPW.icon("schliessen")]),
+      ])));
+  }
+
+  async function ausReiheNehmen(kennung) {
+    try {
+      const antwort = await MPW.hole(`/api/warteschlange/${kennung}`,
+                                     { method: "DELETE" });
+      reiheZeichnen(antwort.warteschlange || []);
+    } catch (fehler) {
+      MPW.melden(fehler.message, "fehler");
     }
   }
 
@@ -139,6 +192,9 @@
       laufenderAuftrag = "";
       MPW.formular.sperren(false);
       MPW.aktualisierung.auftragszustand(false);
+      // Steht noch etwas an, startet es in diesem Moment von selbst. Kurz später
+      // nachfragen, statt den Zustand zu erraten.
+      window.setTimeout(zustandAbgleichen, 900);
     }
     if (nachricht.aktion === "fertig") {
       const titel = nachricht.ergebnis?.titel || "Video";

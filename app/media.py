@@ -24,7 +24,7 @@ import shutil
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import config, errors, logbook
@@ -273,12 +273,79 @@ def _normalisieren(quelle: Path, ziel: Path, *, breite: int, hoehe: int, bildrat
     return ziel
 
 
+#: Zielraster der Montage, nach Seitenverhältnis. Alle Werte gerade — ungerade
+#: Kantenlängen kann libx264 mit yuv420p nicht kodieren.
+_MONTAGERASTER: tuple[tuple[float, int, int], ...] = (
+    (16 / 9, 1920, 1080),
+    (9 / 16, 1080, 1920),
+    (1.0, 1080, 1080),
+    (4 / 3, 1440, 1080),
+    (3 / 4, 1080, 1440),
+    (3 / 2, 1620, 1080),
+    (2 / 3, 1080, 1620),
+)
+
+
+def _als_bruch(seitenverhaeltnis: str) -> float:
+    """„9:16“ → 0.5625. Unlesbares ergibt 0 und wird vom Aufrufer übergangen."""
+    if not seitenverhaeltnis or ":" not in seitenverhaeltnis:
+        return 0.0
+    links, _, rechts = seitenverhaeltnis.partition(":")
+    try:
+        return float(links) / float(rechts)
+    except (ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def zielraster(clips: list[Path], seitenverhaeltnis: str = "") -> tuple[int, int]:
+    """Auf welches Raster wird montiert?
+
+    **Die Bestellung entscheidet.** Wer 9:16 bestellt hat, will einen hochkanten Film —
+    auch dann, wenn ein Videomodell die Vorgabe übergangen und Breitbild geliefert hat.
+    Nur ohne Bestellung wird am Material gemessen.
+
+    Warum das überhaupt eine Frage ist: Vorher stand hier fest 1920×1080. Jeder
+    Hochformat-Auftrag wurde damit mittig auf Breitbild beschnitten — vom 1080×1920-Clip
+    blieb ein schmaler Streifen, und die 9:16-Fassung wurde daraus wieder hochgerechnet.
+    Für TikTok, Reels und Shorts war das Ergebnis unbrauchbar, ohne dass irgendwo ein
+    Fehler gemeldet worden wäre.
+    """
+    gewuenscht = _als_bruch(seitenverhaeltnis)
+
+    gemessen = 0.0
+    for clip in clips:
+        try:
+            daten = angaben(clip)
+        except errors.StudioFehler:
+            continue
+        if daten.breite > 0 and daten.hoehe > 0:
+            gemessen = daten.breite / daten.hoehe
+            break
+
+    # Weichen beide voneinander ab, hat das Modell die Vorgabe übergangen. Montiert
+    # wird trotzdem nach Bestellung — aber es steht im Logbuch, denn der Beschnitt
+    # kostet Bildinhalt und der Kunde soll wissen, woher das kommt.
+    if gewuenscht and gemessen and abs(gewuenscht - gemessen) > 0.05:
+        logbook.warnung(QUELLE, f"Die Clips sind nicht im bestellten Format "
+                                f"({seitenverhaeltnis}) — sie werden zugeschnitten.")
+
+    verhaeltnis = gewuenscht or gemessen
+    if not verhaeltnis:
+        return 1920, 1080
+
+    _, breite, hoehe = min(_MONTAGERASTER, key=lambda r: abs(r[0] - verhaeltnis))
+    return breite, hoehe
+
+
 def montieren(clips: list[Path], ziel: Path, *, weiche_uebergaenge: bool = True,
-              breite: int = 1920, hoehe: int = 1080, bildrate: int = 30,
+              breite: int = 0, hoehe: int = 0, bildrate: int = 30,
+              seitenverhaeltnis: str = "",
               abbruch: threading.Event | None = None, melden=None) -> Path:
     """Setzt mehrere Szenen zu einem Film zusammen.
 
-    Bei einem einzigen Clip wird nur normalisiert — kein unnötiges Neukodieren.
+    Ohne `breite`/`hoehe` wird das Raster aus dem Material bestimmt (siehe
+    `zielraster`). Bei einem einzigen Clip wird nur normalisiert — kein unnötiges
+    Neukodieren.
     """
     clips = [Path(c) for c in clips if Path(c).exists()]
     if not clips:
@@ -286,13 +353,17 @@ def montieren(clips: list[Path], ziel: Path, *, weiche_uebergaenge: bool = True,
             "Es gibt keine Szenen zum Zusammensetzen.",
             "Vermutlich sind alle Einzelaufträge fehlgeschlagen.", ursprung=QUELLE)
 
+    if not breite or not hoehe:
+        breite, hoehe = zielraster(clips, seitenverhaeltnis)
+
     ziel = Path(ziel)
     ziel.parent.mkdir(parents=True, exist_ok=True)
     arbeitsordner = ziel.parent / f".montage_{ziel.stem}"
     arbeitsordner.mkdir(parents=True, exist_ok=True)
 
     try:
-        logbook.info(QUELLE, f"Setze {len(clips)} Szene(n) zusammen …")
+        logbook.info(QUELLE, f"Setze {len(clips)} Szene(n) zusammen "
+                             f"({breite}×{hoehe}) …")
         angepasst: list[Path] = []
         for stelle, clip in enumerate(clips, start=1):
             zwischenziel = arbeitsordner / f"teil_{stelle:02d}.mp4"
@@ -387,14 +458,30 @@ def _mit_ueberblendung(clips: list[Path], ziel: Path,
 # ── Formate erzeugen ─────────────────────────────────────────────────────────
 
 def format_erzeugen(quelle: "str | Path", ziel: "str | Path", kennung: str,
-                    *, abbruch: threading.Event | None = None, melden=None) -> Path:
+                    *, wie_die_quelle: bool = False,
+                    abbruch: threading.Event | None = None, melden=None) -> Path:
     """Erzeugt eine Formatfassung. Videoformate werden mittig zugeschnitten statt
     verzerrt oder mit Balken versehen — bei KI-Videos sitzt das Motiv fast immer in
-    der Bildmitte, und ein scharfer Anschnitt wirkt hochwertiger als schwarze Ränder."""
+    der Bildmitte, und ein scharfer Anschnitt wirkt hochwertiger als schwarze Ränder.
+
+    `wie_die_quelle` übernimmt statt der Vorgabe das Format der Quelle. Gedacht für das
+    Vorschaubild: Das steht mit 1920×1080 in der Tabelle, und ein Hochformat-Film bekam
+    dadurch eine quer beschnittene Kachel — vom stehenden Bild blieb ein Streifen aus
+    der Mitte. Für ein Format, das für TikTok gedacht ist, ist das die falsche Kachel.
+    """
     vorgabe = FORMATE.get(kennung)
     if vorgabe is None:
         raise errors.EingabeFehler(f"Unbekanntes Format: {kennung}",
                                    "Möglich sind: " + ", ".join(FORMATE), ursprung=QUELLE)
+
+    if wie_die_quelle:
+        try:
+            quellmasse = angaben(Path(quelle))
+        except errors.StudioFehler:
+            quellmasse = None
+        if quellmasse and quellmasse.breite > 0 and quellmasse.hoehe > 0:
+            breite, hoehe = zielraster([], f"{quellmasse.breite}:{quellmasse.hoehe}")
+            vorgabe = replace(vorgabe, breite=breite, hoehe=hoehe)
 
     quelle, ziel = Path(quelle), Path(ziel)
     if not quelle.exists():

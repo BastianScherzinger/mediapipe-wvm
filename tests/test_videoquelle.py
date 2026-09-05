@@ -9,7 +9,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import config, errors, higgsfield, higgsfield_mcp, videoquelle  # noqa: E402
+from app import (config, errors, higgsfield, higgsfield_mcp,  # noqa: E402
+                 pipeline, videoquelle)
 
 
 class Weg:
@@ -458,7 +459,22 @@ def test_unbekanntes_modell_endet_in_einer_deutschen_meldung(monkeypatch,
     assert "Modell" in info.value.meldung
 
 
-def test_seitenverhaeltnis_kommt_beim_abo_an(monkeypatch, mit_modellliste):
+@pytest.fixture
+def bekanntes_startbild(monkeypatch):
+    """Ein Startbild, das aus einem eigenen Bildauftrag stammt — der Normalfall.
+
+    Ohne diese Vorgeschichte müsste die Adresse erst beim Dienst eingeführt werden,
+    und das ist genau der Weg, den diese Tests nicht meinen.
+    """
+    monkeypatch.setattr(higgsfield_mcp, "_BILDJOBS", {})
+    monkeypatch.setattr(higgsfield_mcp, "_MEDIENFORM", {"objekt": False})
+    monkeypatch.setattr(higgsfield_mcp, "_BEWEGUNGEN", {"mitschicken": True})
+    higgsfield_mcp._bild_merken("https://bild", "bildauftrag-7")
+    return "https://bild"
+
+
+def test_seitenverhaeltnis_kommt_beim_abo_an(monkeypatch, mit_modellliste,
+                                             bekanntes_startbild):
     """Hochformat war bestellt — dann darf nicht 16:9 herauskommen."""
     gesehen = {}
 
@@ -470,10 +486,197 @@ def test_seitenverhaeltnis_kommt_beim_abo_an(monkeypatch, mit_modellliste):
 
     monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", gefaelscht)
     higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
-        "Prompt", "https://bild", dauer=5,
+        "Prompt", bekanntes_startbild, dauer=5,
         modell="kling-video/v2.6/pro/image-to-video", seitenverhaeltnis="9:16")
     assert gesehen["aspect_ratio"] == "9:16"
     assert gesehen["model"] == "kling2_6_pro"
+
+
+# ── Das Startbild muss beim Videomodell ankommen ─────────────────────────────
+#
+# Der Abbruch beim Kunden hing an genau einer Zeile: `image_url` statt `medias`.
+# Die folgenden Tests halten die Form fest, in beide Richtungen.
+
+def test_startbild_geht_als_medias_hinaus_nie_als_adresse(monkeypatch, mit_modellliste,
+                                                          bekanntes_startbild):
+    """Der Regressionstest zum Abbruch: `generate_video` bekommt die Auftragsnummer
+    des Bildes in `medias` — und unter keinen Umständen eine rohe HTTPS-Adresse."""
+    gesehen = {}
+
+    def gefaelscht(name, argumente, zeitlimit=60):
+        if name == "generate_video":
+            gesehen.update(argumente["params"])
+            return {"results": [{"id": "v1"}]}
+        return {"status": "completed", "result_url": "https://x/y.mp4"}
+
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", gefaelscht)
+    higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
+        "Prompt", bekanntes_startbild, dauer=5,
+        modell="kling-video/v2.6/pro/image-to-video")
+
+    assert gesehen["medias"] == ["bildauftrag-7"]
+    assert "image_url" not in gesehen
+    for wert in gesehen.values():
+        assert "https://bild" != wert
+
+
+def test_bildauftrag_wird_fuer_das_video_gemerkt(monkeypatch, mit_modellliste):
+    """Erst ein Bild, dann das Video daraus: die Nummer des Bildauftrags muss den
+    Weg von selbst finden — sonst müsste die Adresse teuer eingeführt werden."""
+    monkeypatch.setattr(higgsfield_mcp, "_BILDJOBS", {})
+    gesehen = {}
+
+    def gefaelscht(name, argumente, zeitlimit=60):
+        if name == "generate_image":
+            return {"results": [{"id": "bild-42"}]}
+        if name == "generate_video":
+            gesehen.update(argumente["params"])
+            return {"results": [{"id": "video-9"}]}
+        return {"status": "completed",
+                "result_url": "https://ablage/szene1.jpg"}
+
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", gefaelscht)
+    dienst = higgsfield_mcp.HiggsfieldAbo()
+    bild = dienst.bild("Ein Motiv", modell="higgsfield-ai/soul/standard")
+    dienst.video_aus_bild("Bewegung", bild.url, dauer=5,
+                          modell="kling-video/v2.6/pro/image-to-video")
+
+    assert gesehen["medias"] == ["bild-42"]
+
+
+def test_beanstandete_medienform_wird_umgestellt(monkeypatch, mit_modellliste,
+                                                 bekanntes_startbild):
+    """Will der Dienst Objekte statt bloßer Kennungen, darf das keinen Auftrag
+    kosten — die andere Form wird versucht und gemerkt."""
+    versuche = []
+
+    def gefaelscht(name, argumente, zeitlimit=60):
+        if name == "generate_video":
+            versuche.append(argumente["params"].get("medias"))
+            if len(versuche) == 1:
+                return {"error": "invalid params.medias: expected objects"}
+            return {"results": [{"id": "v2"}]}
+        return {"status": "completed", "result_url": "https://x/y.mp4"}
+
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", gefaelscht)
+    higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
+        "Prompt", bekanntes_startbild, dauer=5,
+        modell="kling-video/v2.6/pro/image-to-video")
+
+    assert versuche[0] == ["bildauftrag-7"]
+    assert versuche[1] == [{"id": "bildauftrag-7", "type": "image"}]
+    assert higgsfield_mcp._MEDIENFORM["objekt"] is True      # gemerkt für das nächste Mal
+
+
+def test_fremde_adresse_wird_eingefuehrt(monkeypatch, mit_modellliste):
+    """Stammt das Bild nicht aus einem eigenen Auftrag, wird es über das
+    Import-Werkzeug des Dienstes eingeführt statt roh weitergereicht."""
+    monkeypatch.setattr(higgsfield_mcp, "_BILDJOBS", {})
+    monkeypatch.setattr(higgsfield_mcp, "_WERKZEUGE",
+                        {"zeit": time.time(), "liste": ["job_status", "import_media"]})
+    gesehen = {}
+
+    def gefaelscht(name, argumente, zeitlimit=60):
+        if name == "import_media":
+            return {"media_id": "m-123"}
+        if name == "generate_video":
+            gesehen.update(argumente["params"])
+            return {"results": [{"id": "v3"}]}
+        return {"status": "completed", "result_url": "https://x/y.mp4"}
+
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", gefaelscht)
+    higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
+        "Prompt", "https://fremd/bild.jpg", dauer=5,
+        modell="kling-video/v2.6/pro/image-to-video")
+
+    assert gesehen["medias"] == ["m-123"]
+
+
+def test_ohne_import_werkzeug_gibt_es_eine_deutsche_meldung(monkeypatch,
+                                                            mit_modellliste):
+    """Kann die Adresse nicht eingeführt werden, darf der Kunde nicht mit dem
+    englischen Rohtext des Dienstes dastehen.
+
+    Und es muss ein **Konfigurations**fehler sein: Der beendet den Lauf sofort. Ein
+    Anbieterfehler ließe die Ablaufsteuerung Szene für Szene weitermachen — jede mit
+    einem vorher erzeugten und bezahlten Startbild, das nie ein Video wird.
+    """
+    monkeypatch.setattr(higgsfield_mcp, "_BILDJOBS", {})
+    monkeypatch.setattr(higgsfield_mcp, "_WERKZEUGE",
+                        {"zeit": time.time(), "liste": ["job_status"]})
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen",
+                        lambda *a, **k: {"results": [{"id": "x"}]})
+
+    with pytest.raises(errors.KonfigurationsFehler) as info:
+        higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
+            "Prompt", "https://fremd/bild.jpg", dauer=5,
+            modell="kling-video/v2.6/pro/image-to-video")
+    assert "Startbild" in info.value.meldung
+    assert higgsfield_mcp.errors.KonfigurationsFehler in pipeline._TOEDLICH
+
+
+def test_nur_import_werkzeuge_werden_angefasst():
+    """Ein unbekanntes Werkzeug eines kostenpflichtigen Dienstes aufzurufen ist
+    riskant. `create_image` darf hier unter keinen Umständen darunterfallen."""
+    from app import higgsfield_mcp as m
+    erlaubt = ["import_media", "upload_media", "media_import", "upload_image"]
+    verboten = ["generate_image", "create_image", "create_media", "add_media",
+                "delete_media", "job_status", "models_explore", "cancel_job"]
+
+    def mit(liste):
+        m._WERKZEUGE.update({"zeit": time.time(), "liste": liste})
+        return m._importwerkzeuge()
+
+    try:
+        assert set(mit(erlaubt + verboten)) == set(erlaubt)
+        assert mit(verboten) == []
+    finally:
+        m._WERKZEUGE.update({"zeit": 0.0, "liste": []})
+
+
+def test_beanstandete_bewegung_kostet_keinen_auftrag(monkeypatch, mit_modellliste,
+                                                     bekanntes_startbild):
+    """Kamerabewegungen sind Beiwerk. Kennt das Modell sie nicht, entsteht der Clip
+    ohne sie — statt gar nicht."""
+    versuche = []
+
+    def gefaelscht(name, argumente, zeitlimit=60):
+        if name == "generate_video":
+            versuche.append(argumente["params"].get("motions"))
+            if len(versuche) == 1:
+                return {"error": "unsupported field: motions"}
+            return {"results": [{"id": "v4"}]}
+        return {"status": "completed", "result_url": "https://x/y.mp4"}
+
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", gefaelscht)
+    higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
+        "Prompt", bekanntes_startbild, dauer=5, bewegungen=["zoom_in"],
+        modell="kling-video/v2.6/pro/image-to-video")
+
+    assert versuche[0] == [{"id": "zoom_in"}]
+    assert versuche[1] is None
+
+
+def test_werkzeugliste_vertraegt_jede_form():
+    """`tools/list` ist nicht verbürgt — was sich nicht auspacken lässt, fällt weg,
+    ohne dass ein Auftrag daran scheitert."""
+    normieren = higgsfield_mcp._werkzeuge_normieren
+    assert normieren({"tools": [{"name": "a"}, {"name": "b"}]}) == ["a", "b"]
+    assert normieren(["a", "b"]) == ["a", "b"]
+    assert normieren({"results": [{"id": "c"}]}) == ["c"]
+    assert normieren("Unsinn") == []
+    assert normieren({"nichts": 1}) == []
+
+
+def test_werkzeugliste_bricht_nie_einen_auftrag_ab(monkeypatch):
+    """Antwortet der Dienst nicht, ist das kein Fehler — nur ein leerer Rückfall."""
+    monkeypatch.setattr(higgsfield_mcp, "_WERKZEUGE", {"zeit": 0.0, "liste": []})
+
+    def kaputt(*_a, **_k):
+        raise RuntimeError("kein Netz")
+
+    monkeypatch.setattr(higgsfield_mcp, "_rpc", kaputt)
+    assert higgsfield_mcp.werkzeugliste() == []
 
 
 def test_alle_videowege_nehmen_dasselbe_seitenverhaeltnis_entgegen():

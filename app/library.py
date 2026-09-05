@@ -89,6 +89,56 @@ def begleitzettel_schreiben(ordner: Path, inhalt: dict) -> None:
         logbook.warnung(QUELLE, f"Begleitzettel nicht geschrieben: {type(fehler).__name__}")
 
 
+#: Wohin der Posting-Zettel geschrieben wird.
+_POSTINGZETTEL = "posting.txt"
+
+#: Was zu welchem Bildformat passt — nur als Hinweis auf dem Zettel.
+_PLATTFORMEN = {
+    "9:16": "TikTok · Instagram Reels · YouTube Shorts · Facebook Reels",
+    "3:4": "Instagram Feed (hochkant) · Pinterest",
+    "1:1": "Instagram Feed · Facebook Feed · LinkedIn",
+    "16:9": "YouTube · Webseite · Präsentation",
+    "4:3": "Präsentation · Webseite",
+}
+
+
+def posting_schreiben(ordner: Path, drehbuch, seitenverhaeltnis: str = "") -> dict:
+    """Legt neben das Video einen fertigen Zettel zum Veröffentlichen.
+
+    Ein fertiges Video ist nur die halbe Arbeit: Danach fehlen noch Titel, Text und
+    Hashtags, und genau daran bleibt der Kunde jedes Mal hängen. Das Sprachmodell hat
+    beides ohnehin schon geschrieben — es muss nur an einer Stelle landen, an der man
+    es markieren und kopieren kann.
+
+    Zurück kommt der Inhalt auch als Wörterbuch, damit die Oberfläche ihn ohne einen
+    zweiten Dateizugriff anzeigen kann.
+    """
+    hashtags = list(getattr(drehbuch, "hashtags", []) or [])
+    inhalt = {
+        "titel": drehbuch.titel,
+        "text": getattr(drehbuch, "posting", "") or drehbuch.zusammenfassung,
+        "hashtags": hashtags,
+        "plattformen": _PLATTFORMEN.get(seitenverhaeltnis, ""),
+    }
+
+    zeilen = [drehbuch.titel, ""]
+    if inhalt["text"]:
+        zeilen += [inhalt["text"], ""]
+    if hashtags:
+        zeilen += [" ".join("#" + w for w in hashtags), ""]
+    if inhalt["plattformen"]:
+        zeilen += [f"Passt zu: {inhalt['plattformen']}", ""]
+
+    try:
+        (Path(ordner) / _POSTINGZETTEL).write_text("\n".join(zeilen), encoding="utf-8")
+    except Exception as fehler:
+        # Der Zettel ist Beiwerk. Ein fertiges Video daran scheitern zu lassen wäre
+        # das falsche Verhältnis.
+        logbook.warnung(QUELLE, f"Posting-Zettel nicht geschrieben: {type(fehler).__name__}")
+
+    return inhalt
+
+
 def begleitzettel_lesen(ordner: Path) -> dict:
     try:
         daten = json.loads((Path(ordner) / _BEGLEITZETTEL).read_text(encoding="utf-8"))
@@ -151,6 +201,9 @@ def eintrag(ordner: "str | Path") -> dict | None:
         "mb": round(statistik.st_size / 1_048_576, 2),
         "szenen": len(szenen),
         "briefing": (zettel.get("briefing") or "")[:400],
+        # Titel, Text und Hashtags zum Veröffentlichen. Ältere Videos haben das noch
+        # nicht — dann bleibt das Feld leer und die Oberfläche zeigt es gar nicht erst.
+        "posting": _posting_aus(zettel, ordner),
         "fassungen": fassungen,
         "fehlende": [{"kennung": k, "name": v.name, "kurz": v.kurz or k,
                       "beschreibung": v.beschreibung}
@@ -158,6 +211,40 @@ def eintrag(ordner: "str | Path") -> dict | None:
                      and k != "poster"],
         "in_arbeit": ordner.name in _in_arbeit,
     }
+
+
+def _posting_aus(zettel: dict, ordner: Path) -> dict:
+    """Die Veröffentlichungsangaben eines Videos.
+
+    Erste Wahl ist der Begleitzettel — dort steht das Drehbuch. Fehlt er, wird der
+    Posting-Zettel gelesen; das trifft Videos, die aus einer älteren Fassung stammen
+    oder deren Begleitzettel verloren ging.
+    """
+    drehbuch = zettel.get("drehbuch") or {}
+    ergebnis = zettel.get("ergebnis") or {}
+    posting = ergebnis.get("posting") if isinstance(ergebnis.get("posting"), dict) else {}
+
+    text = (posting.get("text") or drehbuch.get("posting") or
+            drehbuch.get("zusammenfassung") or "")
+    hashtags = posting.get("hashtags") or drehbuch.get("hashtags") or []
+
+    if not text and not hashtags:
+        try:
+            roh = (ordner / _POSTINGZETTEL).read_text(encoding="utf-8").strip()
+        except OSError:
+            return {}
+        zeilen = [z.strip() for z in roh.splitlines() if z.strip()]
+        text = " ".join(z for z in zeilen[1:] if not z.startswith("#")
+                        and not z.startswith("Passt zu:"))
+        hashtags = [w.lstrip("#") for z in zeilen for w in z.split()
+                    if w.startswith("#")]
+
+    if not text and not hashtags:
+        return {}
+    return {"titel": zettel.get("titel") or "",
+            "text": str(text)[:600],
+            "hashtags": [str(w)[:40] for w in list(hashtags)[:8]],
+            "plattformen": posting.get("plattformen", "")}
 
 
 def eintraege(grenze: int = 100) -> list[dict]:
@@ -219,7 +306,7 @@ def format_nachziehen(ordner_relativ: str, kennung: str) -> dict:
         ziel = ordner / f"film_{kennung}.{vorgabe.endung}"
         logbook.ereignis("bibliothek", {"grund": "Format wird erzeugt",
                                         "ordner": web_pfad(ordner), "format": kennung})
-        media.format_erzeugen(film, ziel, kennung,
+        media.format_erzeugen(film, ziel, kennung, wie_die_quelle=(kennung == "poster"),
                               melden=lambda a: logbook.ereignis(
                                   "formatfortschritt",
                                   {"ordner": web_pfad(ordner), "format": kennung,

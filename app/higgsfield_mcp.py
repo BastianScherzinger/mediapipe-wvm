@@ -14,10 +14,17 @@ Rückruf auf einem lokalen Port entgegen. Danach liegt ein Erneuerungstoken auf 
 und alle weiteren Starts laufen ohne Browser.
 
 **Was der Dienst spricht.** MCP über HTTP, Antworten wahlweise als JSON oder als
-Ereignisstrom. Der Ablauf ist derselbe wie bei der Platform-API, nur anders verpackt:
+Ereignisstrom. Der Ablauf ähnelt der Platform-API, ist aber **nicht** derselbe:
 
     tools/call generate_image {params:{model, prompt, aspect_ratio, count}} → results[0].id
+    tools/call generate_video {params:{model, prompt, medias:[…], duration}} → results[0].id
     tools/call job_status      {jobId, sync:true, raw_data:true}            → result_url
+
+Der Unterschied in der zweiten Zeile ist teuer bezahlt: `generate_video` nimmt **keine**
+Bildadresse (`image_url`), sondern nur Kennungen in `medias`. Wer die Platform-Form
+durchreicht, verliert jeden Auftrag — und das Startbild ist zu dem Zeitpunkt schon
+erzeugt und bezahlt. Der Abschnitt „Startbilder an das Videomodell übergeben“ weiter
+unten erklärt, wie diese Kennung ohne einen einzigen Zusatzaufruf zustande kommt.
 
 Die Schnittstelle nach außen ist absichtlich Zeichen für Zeichen dieselbe wie beim
 Platform-Client (`bild`, `video_aus_bild`, `video_aus_text`, `herunterladen`,
@@ -551,6 +558,13 @@ def _ergebnis(nachrichten: list, kennung: int) -> dict:
 
 
 def werkzeug_rufen(name: str, argumente: dict, zeitlimit: int = 60) -> dict:
+    """Ein Werkzeug des Dienstes aufrufen."""
+    return _rpc("tools/call", {"name": name, "arguments": argumente}, zeitlimit)
+
+
+def _rpc(methode: str, parameter: dict, zeitlimit: int = 60) -> dict:
+    """Ein beliebiger MCP-Aufruf. `tools/call` ist der häufigste, aber nicht der
+    einzige: die Werkzeugliste kommt über `tools/list`."""
     token = _gueltiges_token()
     try:
         with httpx.Client(timeout=zeitlimit, headers={"User-Agent": _UA}) as klient:
@@ -570,8 +584,8 @@ def werkzeug_rufen(name: str, argumente: dict, zeitlimit: int = 60) -> dict:
 
             kennung = secrets.randbelow(1_000_000) + 2
             antwort = klient.post(_MCP_URL, headers=_kopfzeilen(token, sitzung), json={
-                "jsonrpc": "2.0", "id": kennung, "method": "tools/call",
-                "params": {"name": name, "arguments": argumente}})
+                "jsonrpc": "2.0", "id": kennung, "method": methode,
+                "params": parameter})
     except httpx.TimeoutException as fehler:
         raise errors.ZeitFehler("Higgsfield hat nicht rechtzeitig geantwortet.",
                                 "Das Programm versucht es erneut.",
@@ -731,6 +745,249 @@ def modell_aufloesen(wunsch: str, art: str) -> str:
     return rueckfall            # leerer oder unbekannter Platform-Pfad
 
 
+# ── Startbilder an das Videomodell übergeben ─────────────────────────────────
+#
+# **Der Fehler, an dem der Kundenlauf hing.** `generate_video` nimmt beim MCP-Dienst
+# keine Bildadresse entgegen. Er antwortet wörtlich:
+#
+#     generate_video accepts uploaded media IDs or completed job IDs in
+#     params.medias, not raw HTTPS URLs. Import the URL first, then retry
+#     generation with the returned media_id.
+#
+# Mitgeschickt wurde aber `image_url` — die Form der Platform-API. Folge: Das Startbild
+# war erzeugt und bezahlt, und der Videoauftrag scheiterte in derselben Sekunde, mit
+# einer Meldung, die im Logbuch wie ein Netzproblem aussah.
+#
+# Der kurze Weg steht in der Meldung selbst: **fertige Auftragsnummern sind erlaubt.**
+# Das Startbild stammt aus unserem eigenen `generate_image`-Auftrag, dessen Nummer wir
+# kennen — es muss also gar nichts hochgeladen werden. Nur eine Adresse von woanders
+# (Platform-Weg, später einmal ein eigenes Bild) wird über das Import-Werkzeug des
+# Dienstes eingeführt.
+
+#: Adresse eines erzeugten Bildes → Nummer des Auftrags, der es gemacht hat.
+#: Begrenzt, damit ein langer Betrieb keinen Speicher frisst; mehr als die Szenen
+#: eines Laufs braucht niemand.
+_BILDJOBS: dict[str, str] = {}
+_BILDJOBS_MAX = 64
+_medien_sperre = threading.Lock()
+
+#: Welche Form `params.medias` angenommen hat: die bloße Kennung oder ein Objekt.
+#: Wird beim ersten Erfolg gesetzt — wie `_STANDFORM`, aus demselben Grund.
+_MEDIENFORM = {"objekt": False}
+
+#: Nimmt der Dienst Kamerabewegungen entgegen? Beanstandet er sie, bleiben sie weg.
+_BEWEGUNGEN = {"mitschicken": True}
+
+#: Gemerkte Werkzeugliste des Dienstes.
+_WERKZEUGE: dict = {"zeit": 0.0, "liste": []}
+
+#: Woran ein Werkzeug zum Einführen fremder Adressen erkennbar ist.
+#:
+#: Bewusst eng: Hier wird ein **unbekanntes** Werkzeug eines kostenpflichtigen Dienstes
+#: aufgerufen. „import“ und „upload“ meinen unmissverständlich das Hereinholen von
+#: etwas Vorhandenem. „create“ oder „add“ wären zu weit — darunter fiele auch
+#: `create_image`, und ein versehentlich ausgelöster Bildauftrag kostet Credits.
+_IMPORTWORTE = ("import", "upload")
+
+#: Was trotz eines Importworts nicht angefasst wird.
+_TABU = ("generate", "create", "delete", "remove", "cancel", "pay", "purchase")
+
+
+def _bild_merken(adresse: str, kennung: str) -> None:
+    """Merkt sich, aus welchem Auftrag ein Startbild stammt."""
+    if not adresse or not kennung:
+        return
+    with _medien_sperre:
+        while len(_BILDJOBS) >= _BILDJOBS_MAX:
+            _BILDJOBS.pop(next(iter(_BILDJOBS)))
+        _BILDJOBS[adresse] = kennung
+
+
+def _werkzeuge_normieren(antwort) -> list[str]:
+    """Macht aus der Antwort von `tools/list` eine schlichte Namensliste."""
+    roh = antwort
+    if isinstance(roh, dict):
+        for schluessel in ("tools", "results", "items", "data"):
+            if isinstance(roh.get(schluessel), list):
+                roh = roh[schluessel]
+                break
+        else:
+            listen = [w for w in roh.values() if isinstance(w, list)]
+            roh = listen[0] if listen else []
+    if not isinstance(roh, list):
+        return []
+
+    namen: list[str] = []
+    for eintrag in roh:
+        if isinstance(eintrag, str):
+            name = eintrag
+        elif isinstance(eintrag, dict):
+            name = str(eintrag.get("name") or eintrag.get("id") or "")
+        else:
+            continue
+        name = name.strip()
+        if name:
+            namen.append(name)
+    return namen
+
+
+def werkzeugliste(erneuern: bool = False) -> list[str]:
+    """Die Werkzeuge, die der Abo-Dienst führt. Eine Stunde lang gemerkt.
+
+    Gebraucht wird sie nur, um das Import-Werkzeug für fremde Bildadressen zu finden.
+    Scheitert der Abruf, ist das kein Fehler — dann bleibt es beim Rückfall. Ein
+    Auftrag darf daran nie scheitern.
+    """
+    if (not erneuern and _WERKZEUGE["liste"] and
+            time.time() - _WERKZEUGE["zeit"] < _MODELLE_FRISCHE):
+        return list(_WERKZEUGE["liste"])
+    try:
+        namen = _werkzeuge_normieren(_rpc("tools/list", {}, zeitlimit=30))
+    except Exception:
+        namen = []
+    if namen:
+        _WERKZEUGE.update({"zeit": time.time(), "liste": namen})
+        logbook.debug(QUELLE, f"{len(namen)} Werkzeuge beim Abo-Dienst gefunden.")
+    return list(namen)
+
+
+def _importwerkzeuge() -> list[str]:
+    """Welche Werkzeuge des Dienstes könnten eine Adresse einführen?
+
+    Kürzere Namen zuerst — `import_media` ist spezifischer als `import_media_batch`.
+    """
+    treffer = [name for name in werkzeugliste()
+               if any(w in name.lower() for w in _IMPORTWORTE)
+               and not any(w in name.lower() for w in _TABU)]
+    return sorted(treffer, key=len)
+
+
+def _medienkennung_aus(antwort) -> str:
+    """Die Medien-Kennung aus der Antwort eines Import-Werkzeugs, egal wo sie steckt."""
+    if not isinstance(antwort, dict):
+        return ""
+    kandidaten: list[dict] = []
+    for schluessel in ("results", "medias", "media", "items", "data"):
+        wert = antwort.get(schluessel)
+        if isinstance(wert, list) and wert:
+            kandidaten.append(wert[0] if isinstance(wert[0], dict) else {"id": wert[0]})
+        elif isinstance(wert, dict):
+            kandidaten.append(wert)
+    kandidaten.append(antwort)
+
+    for eintrag in kandidaten:
+        for feld in ("media_id", "mediaId", "id", "jobId", "job_id"):
+            wert = eintrag.get(feld)
+            if isinstance(wert, (str, int)) and str(wert).strip():
+                return str(wert).strip()
+    return ""
+
+
+def _einfuehren(adresse: str) -> str:
+    """Führt eine fremde Bildadresse beim Dienst ein und gibt die Medien-Kennung.
+
+    Die Argumentform ist nicht verbürgt, deshalb werden mehrere durchprobiert. Das
+    kostet im schlechtesten Fall ein paar vergebliche Aufrufe — aber nur in dem
+    seltenen Fall, dass das Bild nicht aus einem eigenen Auftrag stammt.
+    """
+    werkzeuge = _importwerkzeuge()
+    if not werkzeuge:
+        return ""
+    formen = ({"url": adresse}, {"media_url": adresse}, {"image_url": adresse},
+              {"urls": [adresse]})
+    for name in werkzeuge:
+        for form in formen:
+            for argumente in ({"params": form}, form):
+                try:
+                    antwort = werkzeug_rufen(name, argumente, zeitlimit=90)
+                except Exception:
+                    continue
+                kennung = _medienkennung_aus(antwort)
+                if kennung:
+                    logbook.debug(QUELLE, f"Startbild über „{name}“ eingeführt.")
+                    return kennung
+    return ""
+
+
+def medienkennung(adresse: str) -> str:
+    """Was in `params.medias` gehört, damit das Videomodell das Startbild bekommt.
+
+    Erst der eigene Bildauftrag: dessen Nummer nimmt der Dienst unmittelbar an und
+    kostet keinen weiteren Aufruf. Nur eine fremde Adresse muss eingeführt werden.
+    """
+    adresse = (adresse or "").strip()
+    if not adresse:
+        return ""
+
+    with _medien_sperre:
+        gemerkt = _BILDJOBS.get(adresse, "")
+    if gemerkt:
+        return gemerkt
+
+    if not adresse.lower().startswith(("http://", "https://")):
+        return adresse                      # sieht schon nach einer Kennung aus
+
+    kennung = _einfuehren(adresse)
+    if kennung:
+        _bild_merken(adresse, kennung)
+        return kennung
+
+    # Ausdrücklich ein Konfigurationsfehler, kein Anbieterfehler: Die Ablaufsteuerung
+    # bricht dabei den ganzen Lauf ab, statt Szene für Szene weiterzumachen. Genau das
+    # ist hier richtig — bei der nächsten Szene stünde dieselbe Wand, und jeder weitere
+    # Versuch hätte vorher ein Startbild erzeugt und bezahlt.
+    raise errors.KonfigurationsFehler(
+        "Das Startbild lässt sich nicht an das Videomodell übergeben.",
+        "Higgsfield nimmt im Abo keine Bildadressen entgegen, und ein Werkzeug zum "
+        "Einführen war nicht zu finden. Bitte oben auf „Update“ klicken — und wenn es "
+        "dann noch klemmt, ein Modell ohne Startbild wählen.", ursprung=QUELLE)
+
+
+def _medienfehler(antwort) -> bool:
+    """Beanstandet der Dienst das Feld `medias`? Dann hilft nur die andere Form."""
+    text = _fehlertext(antwort).lower()
+    if not text:
+        return False
+    return "medias" in text or ("media" in text and ("url" in text or " id" in text))
+
+
+def _bewegungsfehler(antwort) -> bool:
+    """Beanstandet der Dienst die Kamerabewegungen? Dann lieber ohne sie."""
+    text = _fehlertext(antwort).lower()
+    return bool(text) and ("motion" in text or "bewegung" in text)
+
+
+def _mit_geduld(aufgabe, *, beschreibung: str,
+                abbruch: threading.Event | None = None):
+    """Führt `aufgabe` aus und wiederholt sie bei vorübergehenden Fehlern.
+
+    Wortgleich zum Vorgehen des Platform-Clients (`_mit_wiederholung`), und aus
+    demselben Grund: Netz- und Zeitfehler sind Störungen, keine Urteile. Was nicht
+    als `wiederholbar` gilt — kein Guthaben, unbekanntes Modell, abgelehnter Inhalt —
+    wird sofort durchgereicht; dort hilft Warten nicht.
+    """
+    letzter: errors.StudioFehler | None = None
+    for versuch in range(config.MAX_RETRIES + 1):
+        if abbruch is not None and abbruch.is_set():
+            raise errors.AbbruchFehler("Abgebrochen.", ursprung=QUELLE)
+        try:
+            return aufgabe()
+        except errors.StudioFehler as fehler:
+            letzter = fehler
+            if not fehler.wiederholbar or versuch >= config.MAX_RETRIES:
+                raise
+            wartezeit = min(2 ** versuch * 2, 20)
+            logbook.warnung(QUELLE, f"{beschreibung} fehlgeschlagen ({fehler.meldung}) "
+                                    f"— Versuch {versuch + 2} von "
+                                    f"{config.MAX_RETRIES + 1} in {wartezeit} s.")
+            for _ in range(wartezeit * 2):      # in kleinen Schritten: Abbruch greift sofort
+                if abbruch is not None and abbruch.is_set():
+                    raise errors.AbbruchFehler("Abgebrochen.", ursprung=QUELLE)
+                time.sleep(0.5)
+    raise letzter or errors.StudioFehler(f"{beschreibung} fehlgeschlagen.",
+                                         ursprung=QUELLE)
+
+
 # ── Derselbe Umgang wie beim Platform-Client ─────────────────────────────────
 
 class HiggsfieldAbo:
@@ -743,9 +1000,17 @@ class HiggsfieldAbo:
         return angemeldet()
 
     @staticmethod
-    def _abschicken(werkzeug: str, bauen, modell: str) -> dict:
-        """Einen Auftrag mit genau diesem Modellnamen abschicken."""
-        return werkzeug_rufen(werkzeug, {"params": bauen(modell)}, zeitlimit=90)
+    def _abschicken(werkzeug: str, bauen, modell: str,
+                    abbruch: threading.Event | None = None) -> dict:
+        """Einen Auftrag mit genau diesem Modellnamen abschicken.
+
+        Mit derselben Geduld wie beim Platform-Weg: Ein Netzhänger auf dem Weg zum
+        Dienst ist kein Grund, einen Auftrag zu verlieren. Ohne diese Wiederholung
+        war der Abo-Weg der einzige, der bei der kleinsten Störung sofort aufgab.
+        """
+        return _mit_geduld(lambda: werkzeug_rufen(werkzeug, {"params": bauen(modell)},
+                                                  zeitlimit=90),
+                           beschreibung=f"Auftrag an {modell}", abbruch=abbruch)
 
     def _auftrag(self, werkzeug: str, bauen, *, art: str, wunsch: str,
                  abbruch: threading.Event | None, melden) -> higgsfield.Ergebnis:
@@ -757,7 +1022,7 @@ class HiggsfieldAbo:
         """
         begonnen = time.monotonic()
         modell = modell_aufloesen(wunsch, art)
-        antwort = self._abschicken(werkzeug, bauen, modell)
+        antwort = self._abschicken(werkzeug, bauen, modell, abbruch)
 
         kennung = _auftragsnummer(antwort)
         if not kennung and _unbekanntes_modell(antwort):
@@ -770,8 +1035,29 @@ class HiggsfieldAbo:
                 logbook.warnung(QUELLE, f"Modell „{modell}“ ist dem Abo-Dienst unbekannt "
                                         f"— es wird „{zweiter}“ genommen.")
                 modell = zweiter
-                antwort = self._abschicken(werkzeug, bauen, modell)
+                antwort = self._abschicken(werkzeug, bauen, modell, abbruch)
                 kennung = _auftragsnummer(antwort)
+
+        if not kennung and _medienfehler(antwort):
+            # Der Dienst beanstandet `params.medias`. Es gibt genau zwei gebräuchliche
+            # Formen — die bloße Kennung und ein Objekt mit `id`. Die andere probieren
+            # und die tragende merken, damit der nächste Auftrag gleich sitzt.
+            _MEDIENFORM["objekt"] = not _MEDIENFORM["objekt"]
+            logbook.warnung(QUELLE, "Higgsfield beanstandet die Form des Startbildes "
+                                    "— es wird die andere versucht.")
+            antwort = self._abschicken(werkzeug, bauen, modell, abbruch)
+            kennung = _auftragsnummer(antwort)
+            if not kennung:
+                _MEDIENFORM["objekt"] = not _MEDIENFORM["objekt"]
+
+        if not kennung and _bewegungsfehler(antwort):
+            # Kamerabewegungen kennt nicht jedes Modell. Sie sind Beiwerk — ein Auftrag
+            # darf nicht daran scheitern, also ohne sie noch einmal.
+            _BEWEGUNGEN["mitschicken"] = False
+            logbook.warnung(QUELLE, "Higgsfield nimmt die Kamerabewegung nicht an "
+                                    "— der Clip entsteht ohne sie.")
+            antwort = self._abschicken(werkzeug, bauen, modell, abbruch)
+            kennung = _auftragsnummer(antwort)
 
         if not kennung:
             grund = config.entschaerfe(_fehlertext(antwort) or str(antwort)[:200])
@@ -792,6 +1078,7 @@ class HiggsfieldAbo:
                 grund, ursprung=QUELLE)
 
         erwartet = 25.0 if art == "bild" else 150.0
+        gestoert = 0
         while True:
             if abbruch is not None and abbruch.is_set():
                 raise errors.AbbruchFehler("Auftrag abgebrochen.", ursprung=QUELLE)
@@ -801,7 +1088,20 @@ class HiggsfieldAbo:
                     f"Higgsfield ist nach {int(vergangen / 60)} Minuten nicht fertig geworden.",
                     "Bitte mit einer kürzeren Szene erneut versuchen.", ursprung=QUELLE)
 
-            stand = _stand_abfragen(kennung)
+            try:
+                stand = _stand_abfragen(kennung)
+                gestoert = 0
+            except errors.StudioFehler as fehler:
+                # Der Auftrag läuft beim Dienst weiter und ist längst bezahlt. Eine
+                # einzelne gestörte Abfrage darf ihn nicht wegwerfen — erst eine Serie
+                # ist ein Problem. (Beim Platform-Weg war das immer so; hier fehlte es.)
+                gestoert += 1
+                if not fehler.wiederholbar or gestoert > config.MAX_RETRIES + 2:
+                    raise
+                logbook.debug(QUELLE, f"Standsabfrage gestört ({fehler.art}) — weiter.")
+                time.sleep(config.POLL_INTERVAL)
+                continue
+
             roh = stand.get("raw_data") if isinstance(stand.get("raw_data"), dict) else stand
             zustand = str(roh.get("status") or "").lower()
 
@@ -824,6 +1124,11 @@ class HiggsfieldAbo:
                         "Bitte erneut versuchen.", ursprung=QUELLE)
                 if melden:
                     melden(1.0, 0.0, "fertig")
+                if art == "bild":
+                    # Die Nummer dieses Auftrags ist genau das, was der Videoauftrag
+                    # gleich in `params.medias` braucht. Ohne dieses Merken müsste die
+                    # Adresse hinterher umständlich wieder eingeführt werden.
+                    _bild_merken(str(adresse), str(kennung))
                 return higgsfield.Ergebnis(str(kennung), modell, adresse,
                                            time.monotonic() - begonnen, roh)
             if zustand == "nsfw":
@@ -862,13 +1167,26 @@ class HiggsfieldAbo:
                        seitenverhaeltnis: str = "16:9",
                        abbruch: threading.Event | None = None,
                        melden=None) -> higgsfield.Ergebnis:
+        # Die Medien-Kennung wird **vor** dem Auftrag geholt: `bauen` kann für einen
+        # zweiten Versuch erneut aufgerufen werden, und ein zweiter Import würde dann
+        # ein zweites Mal Aufwand kosten.
+        medien = medienkennung(bild_url) if bild_url else ""
+
         def bauen(einstellung: str) -> dict:
             parameter = {"model": einstellung, "prompt": prompt[:config.MAX_PROMPT_CHARS],
                          "aspect_ratio": seitenverhaeltnis, "count": 1}
-            if bild_url:
-                parameter["image_url"] = bild_url
+            if medien:
+                # **Kein `image_url`.** Der Dienst weist rohe Adressen ab; er will die
+                # Kennung eines Mediums oder eines fertigen Auftrags in `medias`.
+                parameter["medias"] = ([{"id": medien, "type": "image"}]
+                                       if _MEDIENFORM["objekt"] else [medien])
             if dauer:
                 parameter["duration"] = int(dauer)
+            if bewegungen and _BEWEGUNGEN["mitschicken"]:
+                # Wie bei der Platform-API: Objekte, keine bloßen Zeichenketten.
+                parameter["motions"] = [{"id": k} for k in bewegungen if k]
+            if saat and saat >= 1:
+                parameter["seed"] = int(saat)
             return parameter
 
         return self._auftrag("generate_video", bauen, wunsch=modell or config.VIDEO_MODEL,

@@ -56,6 +56,10 @@ class Drehbuch:
     szenen: list[Szene] = field(default_factory=list)
     quelle: str = ""             # welcher Weg hat es geschrieben
     notbehelf: bool = False      # selbst gebaut, weil kein Modell brauchbar war
+    # Für die Veröffentlichung. Ein fertiges Video nützt wenig, wenn danach noch
+    # eine halbe Stunde Textarbeit ansteht — beides entsteht in einem Zug.
+    posting: str = ""            # Bildunterschrift für TikTok, Reels, Shorts
+    hashtags: list[str] = field(default_factory=list)
 
     @property
     def gesamtdauer(self) -> int:
@@ -66,7 +70,8 @@ class Drehbuch:
                 "zusammenfassung": self.zusammenfassung, "stil": self.stil,
                 "szenen": [s.als_dict() for s in self.szenen],
                 "gesamtdauer": self.gesamtdauer, "quelle": self.quelle,
-                "notbehelf": self.notbehelf}
+                "notbehelf": self.notbehelf,
+                "posting": self.posting, "hashtags": list(self.hashtags)}
 
 
 # ── Anweisung an das Sprachmodell ────────────────────────────────────────────
@@ -97,6 +102,9 @@ REGELN FÜR BEWEGUNGSPROMPTS (Feld "video_prompt", IMMER auf Englisch):
 
 REGELN FÜR DIE SZENENFOLGE:
 - Die Szenen müssen zusammen eine Geschichte ergeben: Aufhänger → Aufbau → Höhepunkt → Abbinder.
+- Die ERSTE Szene ist der Aufhänger und entscheidet alles. Sie muss in der ersten Sekunde
+  etwas Sehenswertes zeigen — eine Bewegung, ein Gesicht, einen Kontrast. Kein langsames
+  Heranfahren an ein leeres Bild, kein Logo, kein Establishing Shot ohne Ereignis.
 - Halte den Look über alle Szenen gleich (gleiche Tageszeit, gleiche Farbwelt, gleicher
   Filmstil), sonst wirkt das montierte Video zusammengestückelt. Wiederhole die
   Look-Angaben deshalb in JEDEM Bildprompt.
@@ -108,6 +116,8 @@ ANTWORTFORMAT — ausschließlich dieses JSON, kein Vorwort, keine Code-Auszeich
   "dateiname": "kurz_und_klein_mit_unterstrichen",
   "zusammenfassung": "Ein deutscher Satz, worum es im Video geht.",
   "stil": "Ein deutscher Halbsatz zum Look, z.B. warmes Morgenlicht, dokumentarisch",
+  "posting": "Deutsche Bildunterschrift zum Veröffentlichen, 1-2 Sätze, ohne Hashtags",
+  "hashtags": ["ohneRaute", "kleingeschrieben", "hoechstens acht"],
   "szenen": [
     {
       "beschreibung": "Deutscher Satz für den Kunden",
@@ -118,8 +128,28 @@ ANTWORTFORMAT — ausschließlich dieses JSON, kein Vorwort, keine Code-Auszeich
 }"""
 
 
+#: Was ein Bildformat für die Bildgestaltung bedeutet. Ohne diesen Hinweis schreibt
+#: jedes Sprachmodell Breitbild-Prompts („wide establishing shot“, „panoramic vista“) —
+#: und die sehen im Hochformat aus wie ein Ausschnitt aus einem anderen Film.
+_FORMATHINWEIS = {
+    "9:16": ("Das Video ist HOCHKANT (9:16) für TikTok, Reels und Shorts. Die Bildprompts "
+             "müssen dazu passen: senkrechte Bildkomposition, Motiv mittig und formatfüllend, "
+             "nah dran statt weit weg. Keine Panoramen, keine breiten Establishing Shots. "
+             "Oben und unten etwas Luft lassen — dort liegen die Bedienelemente der App. "
+             "Schreibe das ausdrücklich in jeden Bildprompt: \"vertical 9:16 composition\"."),
+    "3:4": ("Das Video ist hochkant (3:4). Senkrechte Bildkomposition, Motiv mittig und nah. "
+            "Schreibe in jeden Bildprompt: \"vertical 3:4 composition\"."),
+    "1:1": ("Das Video ist quadratisch (1:1) für den Instagram- und Facebook-Feed. Motiv "
+            "mittig, keine breiten Panoramen. Schreibe in jeden Bildprompt: "
+            "\"square 1:1 composition\"."),
+    "16:9": ("Das Video ist im Breitbild (16:9) für YouTube und Webseiten. Schreibe in jeden "
+             "Bildprompt: \"cinematic 16:9 composition\"."),
+}
+
+
 def _auftragstext(briefing: str, *, szenen: int, sekunden_je_szene: int,
-                  stil: str, zielgruppe: str, tonfall: str) -> str:
+                  stil: str, zielgruppe: str, tonfall: str,
+                  seitenverhaeltnis: str = "") -> str:
     if szenen == 1:
         umfang = (f"Erzeuge GENAU EINE Szene von {sekunden_je_szene} Sekunden. "
                   "Sie muss für sich allein stehen und sofort wirken.")
@@ -129,6 +159,9 @@ def _auftragstext(briefing: str, *, szenen: int, sekunden_je_szene: int,
                   "Die Szenen werden hintereinander montiert.")
 
     zusatz = []
+    hinweis = _FORMATHINWEIS.get(seitenverhaeltnis or "")
+    if hinweis:
+        zusatz.append(hinweis)
     if stil:
         zusatz.append(f"Gewünschter Look: {stil}.")
     if zielgruppe:
@@ -152,6 +185,8 @@ kein Vor- oder Nachwort:
   "dateiname": "<kleinbuchstaben_mit_unterstrichen>",
   "zusammenfassung": "<ein deutscher Satz>",
   "stil": "<deutscher Halbsatz zum Look>",
+  "posting": "<deutsche Bildunterschrift zum Veröffentlichen, 1-2 Sätze, ohne Hashtags>",
+  "hashtags": ["<ohne Raute>", "<höchstens acht>"],
   "szenen": [
     {
       "beschreibung": "<ein deutscher Satz für den Kunden>",
@@ -347,15 +382,52 @@ def _zu_drehbuch(daten: dict, *, szenen_soll: int, dauer_soll: int,
                                 "englischen Prompts deutlich besser — Ergebnis kann "
                                 "schwächer ausfallen.")
 
+    zusammenfassung = _kopffeld(daten, ("zusammenfassung", "summary", "logline"))[:500]
     return Drehbuch(
         titel=titel[:120],
         dateiname=dateiname,
-        zusammenfassung=_kopffeld(daten, ("zusammenfassung", "summary", "logline"))[:500],
+        zusammenfassung=zusammenfassung,
         stil=_kopffeld(daten, ("stil", "style", "look", "stilrichtung",
                                "farbstimmung"))[:200],
         szenen=szenen,
         quelle=quelle,
+        # Ohne eigenen Posting-Text ist die Zusammenfassung der beste Ersatz — besser
+        # als ein leeres Feld, das der Kunde selbst füllen müsste.
+        posting=(_kopffeld(daten, ("posting", "caption", "bildunterschrift",
+                                   "beschreibung_social")) or zusammenfassung)[:600],
+        hashtags=_hashtags(daten),
     )
+
+
+#: Zeichen, die in einem Hashtag nichts verloren haben.
+_HASHTAG_UNRAT = re.compile(r"[^0-9A-Za-zÄÖÜäöüß_]")
+
+
+def _hashtags(daten: dict) -> list[str]:
+    """Die Hashtags aus der Modellantwort — geputzt und begrenzt.
+
+    Sprachmodelle liefern sie mal als Liste, mal als eine Zeile mit Rauten, mal mit
+    Leerzeichen mittendrin. Alles davon wird zu derselben schlichten Liste ohne Raute;
+    die setzt die Oberfläche selbst, damit sie überall gleich aussieht.
+    """
+    roh = None
+    for name in ("hashtags", "tags", "schlagworte"):
+        if daten.get(name):
+            roh = daten[name]
+            break
+    if roh is None:
+        return []
+    if isinstance(roh, str):
+        roh = roh.replace("#", " ").split()
+    if not isinstance(roh, list):
+        return []
+
+    sauber: list[str] = []
+    for eintrag in roh:
+        wort = _HASHTAG_UNRAT.sub("", str(eintrag).lstrip("#").replace(" ", ""))
+        if wort and wort.lower() not in {w.lower() for w in sauber}:
+            sauber.append(wort[:40])
+    return sauber[:8]
 
 
 #: Wörter, die in einem englischen Prompt praktisch nie vorkommen.
@@ -410,6 +482,9 @@ def _notbehelf(briefing: str, *, szenen_soll: int, dauer_soll: int, stil: str) -
         szenen=szenen,
         quelle="Notbehelf",
         notbehelf=True,
+        # Ohne Sprachmodell gibt es keinen klugen Posting-Text. Das Briefing ist der
+        # ehrlichste Ersatz — und es steht wenigstens etwas da, das sich anpassen lässt.
+        posting=briefing.strip()[:280],
     )
 
 
@@ -417,7 +492,7 @@ def _notbehelf(briefing: str, *, szenen_soll: int, dauer_soll: int, stil: str) -
 
 def drehbuch_erstellen(briefing: str, *, szenen: int = 1, sekunden_je_szene: int = 5,
                        stil: str = "", zielgruppe: str = "", tonfall: str = "",
-                       modell: str = "") -> Drehbuch:
+                       modell: str = "", seitenverhaeltnis: str = "") -> Drehbuch:
     """Erzeugt das Drehbuch. Wirft nie wegen eines Modellausfalls — im äußersten Fall
     kommt das selbst gebaute Drehbuch zurück."""
     briefing = (briefing or "").strip()
@@ -434,7 +509,8 @@ def drehbuch_erstellen(briefing: str, *, szenen: int = 1, sekunden_je_szene: int
 
     logbook.info(QUELLE, f"Schreibe Drehbuch: {szenen} Szene(n) à {sekunden_je_szene} s.")
     auftrag = _auftragstext(briefing, szenen=szenen, sekunden_je_szene=sekunden_je_szene,
-                            stil=stil, zielgruppe=zielgruppe, tonfall=tonfall)
+                            stil=stil, zielgruppe=zielgruppe, tonfall=tonfall,
+                            seitenverhaeltnis=seitenverhaeltnis)
 
     try:
         antwort = llm.erzeuge(_SYSTEM, auftrag, zeitlimit=240)
@@ -485,11 +561,12 @@ def drehbuch_erstellen(briefing: str, *, szenen: int = 1, sekunden_je_szene: int
     return drehbuch
 
 
-def eigenen_prompt_veredeln(prompt: str, *, sekunden: int = 5,
-                            modell: str = "") -> Drehbuch:
+def eigenen_prompt_veredeln(prompt: str, *, sekunden: int = 5, modell: str = "",
+                            seitenverhaeltnis: str = "") -> Drehbuch:
     """Für den Freitext-Bereich: der eingegebene Prompt wird zu einem sauberen
     Einzelclip-Drehbuch ausgearbeitet."""
-    return drehbuch_erstellen(prompt, szenen=1, sekunden_je_szene=sekunden, modell=modell)
+    return drehbuch_erstellen(prompt, szenen=1, sekunden_je_szene=sekunden, modell=modell,
+                              seitenverhaeltnis=seitenverhaeltnis)
 
 
 def eigenen_prompt_woertlich(prompt: str, *, sekunden: int = 5,

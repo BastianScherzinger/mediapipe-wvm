@@ -48,6 +48,7 @@ class AttrappeHiggsfield:
         self.bilder = 0
         self.videos = 0
         self.scheitert_bei = scheitert_bei      # Nummer des Videos, das fehlschlagen soll
+        self.scheitert_immer = False            # gar keine Szene kommt durch
         self.abgebrochen = 0
 
     def bild(self, prompt, *, seitenverhaeltnis="16:9", aufloesung="1080p", modell="",
@@ -72,7 +73,8 @@ class AttrappeHiggsfield:
         if abbruch is not None and abbruch.is_set():
             raise errors.AbbruchFehler("Abgebrochen.")
         self.videos += 1
-        if self.scheitert_bei and self.videos == self.scheitert_bei:
+        if self.scheitert_immer or (self.scheitert_bei and
+                                    self.videos == self.scheitert_bei):
             raise errors.AnbieterFehler("Attrappe: Szene absichtlich fehlgeschlagen.",
                                         "Nur ein Test.")
         if melden:
@@ -310,9 +312,13 @@ def test_modell_ohne_startbild_ueberspringt_den_block(studio):
 
 
 @pytest.mark.langsam
-def test_fehler_mitten_im_lauf_wird_sauber_gemeldet(tmp_path, monkeypatch):
-    """Wenn die dritte Szene scheitert, muss der Auftrag als Fehler enden — und die
-    Oberfläche muss erfahren, welcher Block betroffen war."""
+def test_eine_ausgefallene_szene_kostet_nicht_den_ganzen_film(tmp_path, monkeypatch):
+    """Scheitert die dritte von vier Szenen, entsteht der Film aus den drei anderen.
+
+    Die fertigen Clips sind bezahlt. Sie wegzuwerfen, weil eine Szene von der
+    Moderation abgelehnt wurde oder der Dienst einmal gepatzt hat, war der teuerste
+    Ausgang, den das Programm kannte — und beim Kunden der wahrscheinlichste.
+    """
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -332,16 +338,81 @@ def test_fehler_mitten_im_lauf_wird_sauber_gemeldet(tmp_path, monkeypatch):
                                     "sekunden": 5, "formate": []})
         fertig = warten_bis_fertig(auftrag.id)
 
+        assert fertig.zustand == jobstore.FERTIG
+        assert fertig.ergebnis["szenen"] == 3
+        # Verschwiegen wird der Ausfall nicht — er steht im Ergebnis und im Logbuch.
+        assert len(fertig.ergebnis["ausgefallen"]) == 1
+        assert "Szene 3" in fertig.ergebnis["ausgefallen"][0]
+        assert Path(fertig.ergebnis["film"]).is_file()
+        assert pipeline.laeuft_gerade() == ""
+    finally:
+        mitschrift.schliessen()
+
+
+@pytest.mark.langsam
+def test_faellt_jede_szene_aus_endet_der_auftrag_im_fehler(tmp_path, monkeypatch):
+    """Die Gegenprobe: Ohne eine einzige Szene gibt es nichts zu montieren, und die
+    Oberfläche muss den Grund erfahren — kein stiller leerer Film."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
+    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    jobstore.einrichten()
+
+    attrappe = AttrappeHiggsfield(tmp_path / "quelle")
+    attrappe.scheitert_immer = True
+    monkeypatch.setattr(pipeline.higgsfield, "client", attrappe)
+    monkeypatch.setattr(promptsmith.llm, "erzeuge",
+                        lambda *_a, **_k: promptsmith.llm.Antwort(
+                            json.dumps(DREHBUCH), "cli", "test", 0.1))
+    pipeline._aktuell = None
+
+    mitschrift = Mitschrift()
+    try:
+        auftrag = pipeline.starten({"briefing": "Test ganz kaputt", "szenen": 3,
+                                    "sekunden": 5, "formate": []})
+        fertig = warten_bis_fertig(auftrag.id)
+
         assert fertig.zustand == jobstore.FEHLER
         assert "absichtlich" in fertig.fehler["meldung"]
         assert fertig.fehler["art"] == "anbieter"
-
         assert mitschrift.warten_auf("auftrag", "fehler"), \
             "die Oberfläche muss vom Fehler erfahren"
         # Das Wichtigste: das Programm läuft weiter und nimmt sofort neue Aufträge an.
         assert pipeline.laeuft_gerade() == ""
     finally:
         mitschrift.schliessen()
+
+
+@pytest.mark.langsam
+def test_leeres_guthaben_beendet_den_lauf_sofort(tmp_path, monkeypatch):
+    """Kein Guthaben trifft jede Szene gleich. Da ist Weitermachen sinnlos — der Lauf
+    muss auf der Stelle enden, statt fünfmal in dieselbe Wand zu laufen."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
+    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    jobstore.einrichten()
+
+    attrappe = AttrappeHiggsfield(tmp_path / "quelle")
+
+    def kein_guthaben(*_a, **_k):
+        raise errors.GuthabenFehler("Kein Guthaben mehr.", "Aufladen.")
+
+    monkeypatch.setattr(attrappe, "video_aus_bild", kein_guthaben)
+    monkeypatch.setattr(pipeline.higgsfield, "client", attrappe)
+    monkeypatch.setattr(promptsmith.llm, "erzeuge",
+                        lambda *_a, **_k: promptsmith.llm.Antwort(
+                            json.dumps(DREHBUCH), "cli", "test", 0.1))
+    pipeline._aktuell = None
+
+    auftrag = pipeline.starten({"briefing": "Test ohne Guthaben", "szenen": 5,
+                                "sekunden": 5, "formate": []})
+    fertig = warten_bis_fertig(auftrag.id)
+
+    assert fertig.zustand == jobstore.FEHLER
+    assert fertig.fehler["art"] == "guthaben"
+    assert attrappe.bilder == 1, "nach dem Guthabenfehler darf nichts mehr bestellt werden"
 
 
 @pytest.mark.langsam

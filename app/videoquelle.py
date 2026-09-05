@@ -46,13 +46,25 @@ class Probelauf:
         if melden:
             melden(1.0, 0.0, "fertig")
 
+    @staticmethod
+    def _masse(seitenverhaeltnis: str) -> tuple[int, int]:
+        """Platzhalter im bestellten Format.
+
+        Klingt nach Kleinigkeit, ist aber der ganze Zweck des Probelaufs: Er soll
+        zeigen, wie das Ergebnis aussieht. Ein Probelauf, der auf jede Bestellung mit
+        einem Breitbildclip antwortet, verschweigt genau das, was man im Hochformat
+        prüfen will — und der Kunde merkt es erst, wenn er echtes Guthaben ausgegeben hat.
+        """
+        return media.zielraster([], seitenverhaeltnis or "16:9")
+
     def bild(self, prompt: str, *, seitenverhaeltnis: str = "16:9", aufloesung: str = "1080p",
              modell: str = "", verbessern: bool = True, saat: int | None = None,
              abbruch: threading.Event | None = None, melden=None) -> higgsfield.Ergebnis:
         ziel = config.DATA_DIR / "probelauf" / f"bild_{int(time.time() * 1000)}.jpg"
         ziel.parent.mkdir(parents=True, exist_ok=True)
+        breite, hoehe = self._masse(seitenverhaeltnis)
         clip = media.platzhalter_clip(ziel.with_suffix(".mp4"), sekunden=1,
-                                      breite=1280, hoehe=720, abbruch=abbruch)
+                                      breite=breite, hoehe=hoehe, abbruch=abbruch)
         media.format_erzeugen(clip, ziel, "poster", abbruch=abbruch)
         clip.unlink(missing_ok=True)
         self._melden(melden, 1)
@@ -66,8 +78,9 @@ class Probelauf:
                        melden=None) -> higgsfield.Ergebnis:
         ziel = config.DATA_DIR / "probelauf" / f"clip_{int(time.time() * 1000)}.mp4"
         ziel.parent.mkdir(parents=True, exist_ok=True)
+        breite, hoehe = self._masse(seitenverhaeltnis)
         media.platzhalter_clip(ziel, sekunden=max(1, int(dauer)), text=prompt[:60],
-                               abbruch=abbruch)
+                               breite=breite, hoehe=hoehe, abbruch=abbruch)
         self._melden(melden, dauer)
         return higgsfield.Ergebnis("probe-video", "probelauf", str(ziel), float(dauer), {})
 
@@ -75,7 +88,9 @@ class Probelauf:
                        seitenverhaeltnis: str = "16:9",
                        abbruch: threading.Event | None = None,
                        melden=None) -> higgsfield.Ergebnis:
-        return self.video_aus_bild(prompt, "", dauer=dauer, abbruch=abbruch, melden=melden)
+        return self.video_aus_bild(prompt, "", dauer=dauer,
+                                   seitenverhaeltnis=seitenverhaeltnis,
+                                   abbruch=abbruch, melden=melden)
 
     def herunterladen(self, url, ziel, abbruch=None, melden=None) -> Path:
         """Es gibt nichts zu holen — die Datei liegt schon hier."""
