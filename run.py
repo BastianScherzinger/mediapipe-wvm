@@ -203,6 +203,13 @@ def main() -> int:
     print(f"  Bereit: {adresse}")
     print(BALKEN + "\n")
 
+    # Fehlende Zusatzpakete im Hintergrund nachziehen (siehe updater.zusatzpakete_nachziehen).
+    try:
+        from app import updater
+        updater.zusatzpakete_nachziehen()
+    except Exception:
+        pass
+
     if argumente.kein_fenster:
         try:
             while dienst.is_alive():

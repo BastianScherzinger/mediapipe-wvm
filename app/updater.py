@@ -47,6 +47,57 @@ def laeuft() -> bool:
     return _update_laeuft.is_set()
 
 
+def _playwright_vorhanden() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("playwright") is not None
+
+
+def zusatzpakete_nachziehen(im_hintergrund: bool = True) -> bool:
+    """Installiert fehlende Zusatzpakete (`requirements-optional.txt`) beim Start.
+
+    **Warum beim Start und nicht nur beim Update:** Das erste Update auf diese Fassung
+    führt noch der *alte* Updater aus, und der kennt die Zusatzpakete nicht. Ohne diesen
+    Schritt käme Playwright erst mit dem übernächsten Update — bis dahin blieben
+    Cookie-Banner im Werbevideo. Höchstens ein Versuch am Tag, im Hintergrund und ohne
+    Folgen bei Misserfolg: Ohne Playwright fotografiert Edge direkt.
+    """
+    datei = config.BASE_DIR / "requirements-optional.txt"
+    if not datei.exists() or _playwright_vorhanden():
+        return False
+    marke = config.DATA_DIR / ".zusatzpakete_versuch"
+    try:
+        if marke.exists() and time.time() - marke.stat().st_mtime < 24 * 3600:
+            return False
+        marke.write_text(str(time.time()), encoding="utf-8")
+    except OSError:
+        pass
+
+    def arbeiten() -> None:
+        logbook.info(QUELLE, "Zusatzpaket für die Webseiten-Aufnahme wird im Hintergrund "
+                             "installiert …")
+        try:
+            lauf = subprocess.run([sys.executable, "-m", "pip", "install", "-q",
+                                   "--disable-pip-version-check", "-r", str(datei)],
+                                  cwd=str(config.BASE_DIR), capture_output=True, timeout=900)
+            if lauf.returncode == 0:
+                import importlib
+                importlib.invalidate_caches()
+                logbook.erfolg(QUELLE, "Zusatzpaket installiert — die Webseiten-Aufnahme "
+                                       "klickt jetzt auch Cookie-Banner weg.")
+            else:
+                logbook.warnung(QUELLE, "Zusatzpaket ließ sich nicht installieren — "
+                                        "Webseiten werden direkt mit Edge fotografiert.")
+        except Exception as fehler:
+            logbook.warnung(QUELLE, f"Zusatzpaket nicht installiert ({type(fehler).__name__})"
+                                    " — Webseiten werden direkt mit Edge fotografiert.")
+
+    if im_hintergrund:
+        threading.Thread(target=arbeiten, name="zusatzpakete", daemon=True).start()
+    else:
+        arbeiten()
+    return True
+
+
 def neustart_ausstehend() -> bool:
     return bool(_neustart_offen["ja"])
 
