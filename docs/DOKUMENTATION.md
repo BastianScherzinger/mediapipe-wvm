@@ -320,6 +320,29 @@ beim sterbenden Server zu früh neu laden.
 **Voraussetzung beim Kunden:** eine Git-Arbeitskopie. Wer das ZIP herunterlädt, hat
 keine, und der Knopf meldet das ehrlich, statt es zu versuchen.
 
+**Neustart aufschieben statt abbrechen.** Während `aktualisieren()` läuft, nimmt die
+Ablaufsteuerung keine Aufträge an (`updater.laeuft()`). Läuft nach der Paketinstallation
+trotzdem etwas oder wartet etwas in der Reihe, wird der Neustart aufgeschoben
+(`neustart_ausstehend()`); `pipeline._neustart_wenn_faellig()` holt ihn nach dem letzten
+Auftrag nach. Die Route antwortet dann mit `neustart: false`, und die Oberfläche wartet
+nicht auf einen Neustart, der erst später kommt.
+
+**Der Neustart kollidiert nicht mit der Doppelstart-Erkennung.** `run.py` öffnet ein schon
+laufendes Programm, statt ein zweites zu starten (ein zweites hätte laufende Aufträge als
+„unterbrochen“ vermerkt). Der Helfer des Neustarts setzt `MPW_NEUSTART=1` und ist damit
+ausgenommen.
+
+**Zusatzpakete.** `requirements-optional.txt` (Playwright) wird beim Update und beim
+Programmstart im Hintergrund nachgezogen (`updater.zusatzpakete_nachziehen()`, höchstens
+einmal am Tag). Der Start ist nötig, weil das erste Update auf eine neue Fassung immer
+noch der *alte* Updater ausführt — der kennt neue Dateien nicht. Scheitert die
+Installation, fotografiert Edge direkt; nichts bricht ab.
+
+**Update-Weg prüfen:** frischer Klon, `git reset --hard <alter Stand>`, Kundendaten
+anlegen (`.env`, `data/higgsfield_abo.json`, ein Video unter `output/`), Prüfsummen
+nehmen, `updater.aktualisieren(neustart=False)` aufrufen, Prüfsummen vergleichen,
+`git status` muss sauber sein, `python run.py --pruefen` muss starten.
+
 ---
 
 ## 4c. Die Kopfzeile
@@ -424,6 +447,19 @@ nicht mehr auf die Umgebung. (`run.py:voraussetzungen_melden`)
 - **Netzaufrufe** haben immer ein Zeitlimit; Wiederholungen sind begrenzt und finden nur
   bei vorübergehenden Fehlern statt. Guthaben- und Inhaltsfehler werden nie wiederholt —
   das würde nur Zeit kosten.
+- **Nach dem Absenden einer Bestellung wird nie wiederholt.** Ein Zeitlimit oder ein
+  5xx (außer 503) auf `generate_*` bzw. einen Platform-Auftrag heißt: vielleicht
+  angenommen und bezahlt. Das ergibt `errors.UnklarFehler` — nicht wiederholbar, in
+  `pipeline._TOEDLICH`. Wiederholt wird nur, wenn keine Verbindung zustande kam oder der
+  Dienst ausdrücklich „nicht angenommen“ sagt (503, 429). Diese Regel gilt für jeden
+  künftigen bezahlten Aufruf.
+- **Herkunftsschutz im Server.** `server.herkunft_pruefen()` weist Anfragen mit fremdem
+  `Host` (DNS-Rebinding) und POST-Anfragen mit fremder `Origin` ab. Sonst könnte jede
+  Webseite im Browser des Kunden „Update“, „Neustart“ oder „Erneut versuchen“ auslösen.
+- **Webseiten-Aufnahme.** Nur öffentliche Adressen; jede Weiterleitung wird einzeln
+  geprüft (`webaufnahme.sicher_abrufen`), Playwright sperrt Anfragen der Seite an lokale
+  Ziele, die Endadresse im Browser wird nachgeprüft. Cookie-Banner werden abgelehnt,
+  nicht angenommen, wo ein Ablehnen-Knopf existiert.
 
 ---
 
