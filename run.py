@@ -21,6 +21,7 @@ Aufrufe:
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import sys
 import threading
@@ -61,6 +62,19 @@ def freier_port(wunsch: int, versuche: int = 20) -> int:
                                      f"{wunsch + versatz} verwendet.")
             return wunsch + versatz
     raise RuntimeError(f"Zwischen {wunsch} und {wunsch + versuche} ist kein Port frei.")
+
+
+def _laeuft_schon(port: int) -> bool:
+    """Antwortet auf diesem Port bereits dieses Programm?"""
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://{config.HOST}:{port}/api/lebt",
+                                    timeout=1.5) as antwort:
+            daten = json.loads(antwort.read().decode("utf-8"))
+        return bool(daten.get("ok")) and "version" in daten
+    except Exception:
+        return False
 
 
 def voraussetzungen_melden() -> bool:
@@ -151,8 +165,22 @@ def main() -> int:
 
     voraussetzungen_melden()
 
+    # Läuft das Programm schon? Dann nicht ein zweites Mal starten, sondern das laufende
+    # zeigen. Ein zweiter Start richtete sich beim Hochfahren den Auftragsspeicher neu
+    # ein und vermerkte dabei den Auftrag des ersten als „unterbrochen“ — obwohl der
+    # weiterlief. Ein doppelter Klick auf start.bat genügte dafür. Der Neustart nach
+    # einem Update ist ausgenommen: Dort ist der alte Prozess gerade am Gehen.
+    wunschport = argumente.port or config.PORT
+    if not os.environ.get("MPW_NEUSTART") and _laeuft_schon(wunschport):
+        adresse = f"http://{config.HOST}:{wunschport}"
+        print(f"  Das Programm läuft bereits: {adresse}")
+        print(BALKEN + "\n")
+        if not argumente.kein_fenster:
+            webbrowser.open(adresse)
+        return 0
+
     try:
-        port = freier_port(argumente.port or config.PORT)
+        port = freier_port(wunschport)
     except RuntimeError as fehler:
         print(f"  [X] {fehler}")
         return 1

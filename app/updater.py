@@ -204,6 +204,19 @@ def aktualisieren(neustart: bool = True) -> dict:
         logbook.warnung(QUELLE, f"Pakete nicht geprüft ({type(fehler).__name__}) — "
                                 "das Programm startet trotzdem neu.")
 
+    # Zusatzpakete getrennt und ohne Folgen bei Misserfolg: Playwright macht die
+    # Webseiten-Aufnahme besser (Cookie-Banner, nachladende Bilder), ist aber nicht
+    # nötig — ohne es fotografiert Edge direkt. Stünde es in requirements.txt, könnte
+    # ein Rechner, auf dem es sich nicht installieren lässt, gar nichts mehr nachziehen.
+    optional = config.BASE_DIR / "requirements-optional.txt"
+    if optional.exists():
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q",
+                            "--disable-pip-version-check", "-r", str(optional)],
+                           cwd=str(config.BASE_DIR), capture_output=True, timeout=600)
+        except Exception:
+            pass
+
     if neustart:
         logbook.info(QUELLE, "Das Programm startet in wenigen Sekunden neu.")
         neu_starten()
@@ -224,10 +237,13 @@ def neu_starten(verzoegerung: float = 1.5) -> None:
     # Die Aufrufparameter des laufenden Programms übernehmen (etwa --browser).
     startbefehl += [a for a in sys.argv[1:] if a not in ("--pruefen",)]
 
+    # MPW_NEUSTART sagt dem neuen Prozess, dass er nicht auf den alten achten soll —
+    # der ist gerade am Beenden und antwortet womöglich noch einen Augenblick.
     helfer = (
-        "import subprocess, sys, time\n"
+        "import os, subprocess, sys, time\n"
         f"time.sleep({max(0.5, verzoegerung)})\n"
-        f"subprocess.Popen({startbefehl!r}, cwd={str(config.BASE_DIR)!r})\n"
+        f"subprocess.Popen({startbefehl!r}, cwd={str(config.BASE_DIR)!r}, "
+        "env={**os.environ, 'MPW_NEUSTART': '1'})\n"
     )
 
     losgeloest = 0

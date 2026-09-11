@@ -1,0 +1,9 @@
+# MEDIAPIPE WVM — Zusatzpakete
+# Werden beim Update ohne Folgen bei Misserfolg nachgezogen.
+# Installation von Hand:  python -m pip install -r requirements-optional.txt
+
+# Webseiten-Aufnahme für „Webseite → TikTok“: klickt Cookie-Banner weg, wartet
+# nachladende Bilder ab und stellt die Seite als Handy dar. Nutzt den installierten
+# Microsoft Edge — ein eigener Browser muss nicht heruntergeladen werden.
+# Ohne dieses Paket fotografiert Edge direkt über die Kommandozeile.
+playwright>=1.45

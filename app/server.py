@@ -14,13 +14,15 @@ Die Oberfläche muss deshalb nie einen Ausnahmetext auswerten — sie zeigt `mel
 from __future__ import annotations
 
 import mimetypes
+import re
 import time
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 from . import (config, errors, higgsfield, higgsfield_mcp, jobstore, library, llm,
-               logbook, media, pipeline, topics, updater, videoquelle)
+               logbook, media, pipeline, topics, updater, videoquelle, webaufnahme,
+               webwerbung)
 
 QUELLE = "Server"
 
@@ -77,7 +79,29 @@ def anwendung_bauen() -> Flask:
 
     @app.get("/")
     def startseite():
-        return send_from_directory(config.TEMPLATE_DIR, "index.html")
+        """Die Oberfläche — mit einem Stand-Zeichen an Stylesheet und Skripten.
+
+        Nach einem Update hielt ein Browser sonst womöglich die alten Dateien fest, und
+        die neue Fassung sähe aus wie die alte (beim Durchklicken am 11.09.2026
+        beobachtet). Das Zeichen ist der jüngste Änderungszeitpunkt unter `static/`.
+        """
+        seite = (config.TEMPLATE_DIR / "index.html").read_text(encoding="utf-8")
+        seite = re.sub(r'(/static/[^"?]+\.(?:css|js))"', rf'\1?v={_stand_der_dateien()}"',
+                       seite)
+        return Response(seite, mimetype="text/html")
+
+    _stand_gemerkt = {"wert": 0, "zeit": 0.0}
+
+    def _stand_der_dateien() -> int:
+        """Jüngster Änderungszeitpunkt unter `static/` — eine Minute lang gemerkt."""
+        if time.monotonic() - _stand_gemerkt["zeit"] > 60 or not _stand_gemerkt["wert"]:
+            try:
+                wert = int(max(p.stat().st_mtime for p in config.STATIC_DIR.rglob("*")
+                               if p.is_file()))
+            except ValueError:
+                wert = int(time.time())
+            _stand_gemerkt.update({"wert": wert, "zeit": time.monotonic()})
+        return _stand_gemerkt["wert"]
 
     # ── Grunddaten ───────────────────────────────────────────────────────────
 
@@ -99,6 +123,11 @@ def anwendung_bauen() -> Flask:
                         "max_warteschlange": pipeline.MAX_SCHLANGE},
             "laufender_auftrag": pipeline.laeuft_gerade(),
             "warteschlange": pipeline.warteschlange(),
+            # Welcher Weg die Videos macht — die Oberfläche zeigt nur die Modelle,
+            # die über ihn zu haben sind, und sagt dem Kunden, womit er arbeitet.
+            "videoweg": videoquelle.aktiver_weg(),
+            "videoweg_name": videoquelle.name_des_aktiven(),
+            "webseite": webwerbung.katalog(),
         })
 
     @app.get("/api/zustand")
@@ -125,6 +154,8 @@ def anwendung_bauen() -> Flask:
             # sondern das Abo die Videos macht.
             "videowege": videoquelle.uebersicht(),
             "videoweg_aktiv": videoquelle.name_des_aktiven(),
+            "videoweg": videoquelle.aktiver_weg(),
+            "webaufnahme": webaufnahme.werkzeuge_befund(),
         }
         logbook.info(QUELLE, "Selbsttest durchgeführt.")
         logbook.ereignis("diagnose", ergebnis)
@@ -192,6 +223,17 @@ def anwendung_bauen() -> Flask:
             list(daten.get("argumente") or []),
             {"zielgruppe": daten.get("zielgruppe"), "botschaft": daten.get("botschaft")})
         return gut({"briefing": text})
+
+    # ── Webseite → TikTok ────────────────────────────────────────────────────
+
+    @app.post("/api/webseite/pruefen")
+    def webseite_pruefen():
+        """Prüft einen Link, bevor ein Auftrag daraus wird — Vorschau für die Oberfläche."""
+        daten = request.get_json(silent=True) or {}
+        pruefung = webaufnahme.adresse_pruefen(str(daten.get("url") or ""))
+        return gut({"webseite": {k: pruefung.get(k) for k in (
+            "url", "host", "titel", "beschreibung", "bild", "favicon", "marke",
+            "dauer_ms", "status")}})
 
     # ── Aufträge ─────────────────────────────────────────────────────────────
 

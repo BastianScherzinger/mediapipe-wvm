@@ -1,4 +1,4 @@
-/* formular.js — die linke Spalte: Formular und eigener Prompt.
+/* formular.js — die linke Spalte des Video-Studios: Formular und eigener Prompt.
  *
  * Zwei Eingabewege, ein Auftrag. Der Formularweg baut aus Thema, Gegenstand und
  * Merkmalen einen Briefingtext, den der Benutzer VOR dem Start im Klartext sieht — es
@@ -11,7 +11,7 @@
 "use strict";
 
 (function (MPW) {
-  const { $, $$, el, icon } = MPW;
+  const { $, $$, el } = MPW;
 
   const zustand = {
     thema: "",
@@ -20,24 +20,26 @@
     modus: "formular",
     laenge: "einzel",
     videomodelle: [],
+    videoweg: "",             // platform · abo · demo — bestimmt, welche Modelle es gibt
     formate: [],
     katalog: null,
     briefing: "",             // der zuletzt gebaute Briefingtext
   };
 
-  MPW.formular = { aufbauen, sammeln, sperren, zustand };
+  MPW.formular = { aufbauen, sammeln, sperren, wegSetzen, zustand };
 
   /* ── Aufbau ────────────────────────────────────────────────────────────── */
 
   function aufbauen(start) {
     zustand.katalog = start.katalog;
     zustand.videomodelle = start.videomodelle;
+    zustand.videoweg = start.videoweg || "";
     zustand.formate = start.formate;
 
     zieleBauen(start.katalog.plattformen || []);
     themenBauen(start.katalog.themen);
     argumenteBauen(start.katalog.argumentgruppen);
-    modelleBauen(start.videomodelle);
+    modelleBauen();
     formatwahlBauen(start.formate, start.standardformate);
     reiterVerdrahten();
     laengeVerdrahten(start.grenzen);
@@ -54,6 +56,7 @@
    * „Weitere Einstellungen“ zusammenzusuchen hat in der Praxis dazu geführt, dass
    * am Ende doch 16:9 eingestellt blieb — und ein Breitbildvideo bei TikTok landete.
    * Ein Klick setzt jetzt alle vier. Überstimmen lässt sich hinterher jede einzelne.
+   * Deshalb steht die Wahl auch ganz oben — nicht mehr unter Thema und Merkmalen.
    */
   function zieleBauen(plattformen) {
     const behaelter = $("#ziele");
@@ -113,6 +116,7 @@
       kaestchen.checked = (ziel.formate || []).includes(kaestchen.value);
     }
 
+    formatGrenzenAnwenden();
     laengeHinweisErneuern();
     merken();
   }
@@ -218,20 +222,55 @@
     }
     if (kaestchen.checked) zustand.argumente.add(kaestchen.value);
     else zustand.argumente.delete(kaestchen.value);
+    merkmaleZaehlen();
     briefingErneuern();
     merken();
   }
 
-  function modelleBauen(modelle) {
+  /** Die Merkmale sind eingeklappt — die Zahl im Titel verrät, ob schon welche gewählt sind. */
+  function merkmaleZaehlen() {
+    const marke = $("#merkmale-zahl");
+    if (!marke) return;
+    const anzahl = zustand.argumente.size;
+    marke.hidden = anzahl === 0;
+    marke.textContent = String(anzahl);
+  }
+
+  /* ── Modelle ─────────────────────────────────────────────────────────────
+   *
+   * Platform-API und Abo führen verschiedene Kataloge. Angeboten wird nur, was der
+   * aktive Weg kann — ein Modell, das erst nach dem bezahlten Startbild scheitert,
+   * darf gar nicht erst zur Wahl stehen.
+   */
+  function sichtbareModelle() {
+    const weg = zustand.videoweg;
+    if (!weg || weg === "demo") return zustand.videomodelle;
+    return zustand.videomodelle.filter((m) => (m.wege || ["platform"]).includes(weg));
+  }
+
+  function modelleBauen() {
     const wahl = $("#videomodell");
+    const bisher = wahl.value;
+    const modelle = sichtbareModelle();
     wahl.replaceChildren(...modelle.map((modell) =>
       el("option", {
         value: modell.id,
-        selected: modell.empfohlen || null,
         text: modell.name + (modell.empfohlen ? " — empfohlen" : ""),
       })));
-    wahl.addEventListener("change", () => { modellHinweisErneuern(); merken(); });
+    const behalten = modelle.find((m) => m.id === bisher);
+    wahl.value = behalten ? bisher : (modelle.find((m) => m.empfohlen) || modelle[0] || {}).id || "";
+    if (!wahl.dataset.verdrahtet) {
+      wahl.addEventListener("change", () => { modellHinweisErneuern(); merken(); });
+      wahl.dataset.verdrahtet = "ja";
+    }
     modellHinweisErneuern();
+  }
+
+  /** Wird nach dem Verbinden oder Trennen des Abos aufgerufen. */
+  function wegSetzen(weg) {
+    if (weg === undefined || weg === zustand.videoweg) return;
+    zustand.videoweg = weg || "";
+    modelleBauen();
   }
 
   function modellHinweisErneuern() {
@@ -241,7 +280,7 @@
     $("#modell-hinweis").textContent = modell.beschreibung +
       (modell.startbild ? "" : " Ohne Startbild-Schritt.");
 
-    // Nur die Clipdauern anbieten, die das Modell wirklich kennt — die API weist
+    // Nur die Clipdauern anbieten, die das Modell wirklich kennt — der Dienst weist
     // alles andere ab, und ein Fehler nach zwei Minuten Wartezeit wäre ärgerlich.
     const dauerWahl = $("#clipdauer");
     const bisher = Number(dauerWahl.value) || 0;
@@ -249,12 +288,33 @@
       el("option", { value: sekunden, text: sekunden + " Sekunden",
                      selected: sekunden === bisher || null })));
     if (!dauerWahl.value) dauerWahl.selectedIndex = 0;
+    formatGrenzenAnwenden();
     laengeHinweisErneuern();
+  }
+
+  /** Über das Abo nimmt ein Modell nur bestimmte Formate an (Kling: 16:9, 9:16, 1:1).
+   *  Was es nicht kann, wird ausgegraut — und ein nicht mehr passendes Format auf das
+   *  nächstliegende gestellt, statt beim Dienst abgewiesen zu werden. */
+  function formatGrenzenAnwenden() {
+    const modell = aktuellesModell();
+    const wahl = $("#verhaeltnis");
+    const erlaubt = zustand.videoweg === "abo" && modell && (modell.formate || []).length
+      ? modell.formate : null;
+    for (const option of wahl.options) option.disabled = Boolean(erlaubt && !erlaubt.includes(option.value));
+    if (erlaubt && !erlaubt.includes(wahl.value)) {
+      const [b, h] = wahl.value.split(":").map(Number);
+      const ziel = b / h;
+      wahl.value = erlaubt.slice().sort((x, y) => {
+        const [xb, xh] = x.split(":").map(Number);
+        const [yb, yh] = y.split(":").map(Number);
+        return Math.abs(xb / xh - ziel) - Math.abs(yb / yh - ziel);
+      })[0];
+    }
   }
 
   function aktuellesModell() {
     const kennung = $("#videomodell").value;
-    return zustand.videomodelle.find((m) => m.id === kennung) || zustand.videomodelle[0];
+    return zustand.videomodelle.find((m) => m.id === kennung) || sichtbareModelle()[0];
   }
 
   function formatwahlBauen(formate, standard) {
@@ -285,6 +345,7 @@
       $("#reiter-frei").setAttribute("aria-selected", String(!istFormular));
       $("#feld-formular").hidden = !istFormular;
       $("#feld-frei").hidden = istFormular;
+      $("#vorschau-gruppe").hidden = !istFormular;
       merken();
     };
     $("#reiter-formular").addEventListener("click", () => wechseln("formular"));
@@ -300,7 +361,7 @@
     }, 250));
 
     $("#woertlich").addEventListener("change", merken);
-    $("#weich").addEventListener("change", merken);
+    $("#weich").addEventListener("change", () => { laengeHinweisErneuern(); merken(); });
     $("#verhaeltnis").addEventListener("change", merken);
     $("#clipdauer").addEventListener("change", () => { laengeHinweisErneuern(); merken(); });
   }
@@ -390,6 +451,8 @@
     const szenen = zustand.laenge === "story" ? Number($("#szenen").value) || 2 : 1;
     const formate = $$("#formatwahl input:checked").map((k) => k.value);
 
+    if (!modell) throw new Error("Für diesen Videoweg steht kein Modell bereit.");
+
     if (zustand.modus === "frei") {
       const text = $("#freitext").value.trim();
       if (text.length < 3) {
@@ -432,20 +495,19 @@
   function knoepfeVerdrahten() {
     $("#btn-start").addEventListener("click", () => MPW.start.auftragStarten());
     $("#btn-abbruch").addEventListener("click", () => MPW.start.auftragAbbrechen());
+    $("#btn-wiederholen").addEventListener("click", () => MPW.start.auftragWiederholen());
   }
 
-  /** Während ein Auftrag läuft, ist die Eingabe gesperrt — sonst ändert jemand die
-   *  Einstellungen und wundert sich über das Ergebnis. */
-  function sperren(gesperrt) {
-    $("#btn-start").disabled = gesperrt;
-    $("#btn-start").hidden = gesperrt;
-    $("#btn-abbruch").hidden = !gesperrt;
-    for (const feld of $$(".rollbereich input, .rollbereich select, .rollbereich textarea, " +
-                          ".rollbereich .thema, .rollbereich .segment-knopf")) {
-      feld.disabled = gesperrt;
-    }
-    $("#feld-formular").style.opacity = gesperrt ? ".55" : "";
-    $("#feld-frei").style.opacity = gesperrt ? ".55" : "";
+  /** Während ein Auftrag läuft, bleibt das Formular bedienbar: Ein weiterer Auftrag
+   *  stellt sich an. Früher war der Startknopf dann verschwunden — die Warteschlange
+   *  gab es, aber niemand kam an sie heran. Jetzt heißt er „Einreihen“, und daneben
+   *  steht „Abbrechen“ für den laufenden. */
+  function sperren(laeuft) {
+    $("#btn-start").disabled = false;
+    $("#btn-start-text").textContent = laeuft ? "Einreihen" : "Video erzeugen";
+    $("#btn-start").title = laeuft
+      ? "Startet von selbst, sobald der laufende Auftrag fertig ist." : "";
+    $("#btn-abbruch").hidden = !laeuft;
   }
 
   /* ── Eingaben merken ───────────────────────────────────────────────────── */
@@ -489,11 +551,12 @@
     $("#woertlich").checked = !!gemerkt.woertlich;
     $("#weich").checked = gemerkt.weich !== false;
     if (gemerkt.verhaeltnis) $("#verhaeltnis").value = gemerkt.verhaeltnis;
-    if (gemerkt.modell) {
+    if (gemerkt.modell && sichtbareModelle().some((m) => m.id === gemerkt.modell)) {
       $("#videomodell").value = gemerkt.modell;
-      modellHinweisErneuern();
     }
+    modellHinweisErneuern();
     if (gemerkt.dauer) $("#clipdauer").value = gemerkt.dauer;
+    if (!$("#clipdauer").value) $("#clipdauer").selectedIndex = 0;
 
     for (const [name, wert] of Object.entries(gemerkt.zusatz || {})) {
       const feld = $(`[data-zusatz="${name}"]`);
@@ -504,6 +567,7 @@
     for (const kaestchen of $$("#argumentgruppen input")) {
       kaestchen.checked = zustand.argumente.has(kaestchen.value);
     }
+    merkmaleZaehlen();
     for (const kaestchen of $$("#formatwahl input")) {
       kaestchen.checked = (gemerkt.formate || []).includes(kaestchen.value);
     }

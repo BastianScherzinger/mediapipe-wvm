@@ -30,6 +30,9 @@
     <g id="i-neu"><path d="M4 12a8 8 0 1 1 2.5 5.8"/><path d="M4 18v-5h5"/></g>
     <g id="i-schliessen"><path d="m7 7 10 10M17 7 7 17"/></g>
     <g id="i-schluessel"><circle cx="8" cy="12" r="4"/><path d="M12 12h8M17.5 12v3M20 12v2.5"/></g>
+    <g id="i-link"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></g>
+    <g id="i-handy"><rect x="7" y="3" width="10" height="18" rx="2.2"/><path d="M11 18h2"/></g>
+    <g id="i-reihe"><path d="M5 7h14M5 12h14M5 17h9"/></g>
   </defs>
 </svg>
 
@@ -37,8 +40,18 @@
   <div class="kopf-marke">
     <span class="kopf-punkt" aria-hidden="true"></span>
     <h1>MEDIAPIPE <span>WVM</span></h1>
-    <span class="kopf-untertitel">KI-Video-Studio</span>
   </div>
+
+  <nav class="seitenwahl" aria-label="Bereich">
+    <button class="seitenwahl-knopf ist-an" type="button" data-seite="studio"
+            aria-current="page">
+      <svg class="icon" viewBox="0 0 24 24"><use href="#i-film"/></svg>Video-Studio
+    </button>
+    <button class="seitenwahl-knopf" type="button" data-seite="webseite">
+      <svg class="icon" viewBox="0 0 24 24"><use href="#i-handy"/></svg>Webseite → TikTok
+    </button>
+  </nav>
+
   <div class="kopf-status">
     <button class="lampe" id="lampe-higgsfield" type="button">
       <span class="lampe-punkt"></span><span id="lampe-higgsfield-text">Higgsfield</span>
@@ -67,9 +80,11 @@
 
 <main class="raster">
 
-  <!-- ══ Links: Briefing ══════════════════════════════════════════════════ -->
-  <section class="spalte-links" aria-label="Briefing">
-    <div class="glas glas-hoch">
+  <!-- ══ Links: Eingabe ═══════════════════════════════════════════════════ -->
+  <section class="spalte-links" aria-label="Eingabe">
+
+    <!-- ── Seite 1: Video-Studio ─────────────────────────────────────────── -->
+    <div class="glas glas-hoch" id="seite-studio" data-seite-inhalt="studio">
       <div class="reiter" role="tablist" aria-label="Eingabeart">
         <button class="reiter-knopf ist-an" id="reiter-formular" role="tab"
                 aria-selected="true" aria-controls="feld-formular">Formular</button>
@@ -78,6 +93,13 @@
       </div>
 
       <div class="rollbereich">
+
+        <!-- Die erste Entscheidung: Sie setzt Format, Länge und Ausgabefassungen. -->
+        <fieldset class="feldgruppe">
+          <legend>Wohin soll das Video?</legend>
+          <div class="ziele" id="ziele" role="radiogroup" aria-label="Zielplattform"></div>
+          <p class="hinweis" id="ziel-hinweis"></p>
+        </fieldset>
 
         <!-- ── Formular ── -->
         <div id="feld-formular" role="tabpanel" aria-labelledby="reiter-formular">
@@ -95,23 +117,18 @@
 
           <div id="zusatzfelder"></div>
 
-          <fieldset class="feldgruppe">
-            <legend>Merkmale</legend>
+          <details class="mehr aufklapper" id="merkmale-box">
+            <summary>Stil &amp; Anmutung <span class="zaehlmarke" id="merkmale-zahl"
+                     hidden></span><em>optional</em></summary>
             <div id="argumentgruppen"></div>
-          </fieldset>
-
-          <fieldset class="feldgruppe">
-            <legend>Das geht an Claude</legend>
-            <p class="vorschau" id="briefing-vorschau">Thema wählen und kurz beschreiben,
-              worum es geht.</p>
-          </fieldset>
+          </details>
         </div>
 
         <!-- ── Eigener Prompt ── -->
         <div id="feld-frei" role="tabpanel" aria-labelledby="reiter-frei" hidden>
           <fieldset class="feldgruppe">
             <legend><label for="freitext">Ihr Prompt</label></legend>
-            <textarea id="freitext" class="eingabe eingabe-flaeche" rows="10"
+            <textarea id="freitext" class="eingabe eingabe-flaeche" rows="8"
               placeholder="Beschreiben Sie die Szene so genau wie möglich — Motiv, Licht, Kamera, Stimmung."></textarea>
             <p class="hinweis"><span id="freitext-zaehler">0</span> Zeichen</p>
           </fieldset>
@@ -127,36 +144,31 @@
         </div>
 
         <!-- ── Gemeinsame Einstellungen ── -->
-        <fieldset class="feldgruppe">
-          <legend>Wohin soll das Video?</legend>
-          <div class="ziele" id="ziele" role="radiogroup" aria-label="Zielplattform"></div>
-          <p class="hinweis" id="ziel-hinweis"></p>
-        </fieldset>
+        <div class="zweispaltig">
+          <fieldset class="feldgruppe">
+            <legend>Länge</legend>
+            <div class="segment" role="radiogroup" aria-label="Art des Videos">
+              <button class="segment-knopf ist-an" type="button" data-laenge="einzel"
+                      role="radio" aria-checked="true">Einzelclip</button>
+              <button class="segment-knopf" type="button" data-laenge="story"
+                      role="radio" aria-checked="false">Storyboard</button>
+            </div>
+          </fieldset>
+          <fieldset class="feldgruppe">
+            <legend><label for="videomodell">Modell</label></legend>
+            <select id="videomodell" class="eingabe"></select>
+          </fieldset>
+        </div>
+        <div id="story-regler" hidden>
+          <label class="regler-zeile" for="szenen">
+            <span>Szenen</span><output id="szenen-wert">5</output>
+          </label>
+          <input type="range" id="szenen" min="2" max="12" value="5" class="regler">
+        </div>
+        <p class="hinweis hinweis-block" id="laenge-hinweis"></p>
+        <p class="hinweis" id="modell-hinweis"></p>
 
-        <fieldset class="feldgruppe">
-          <legend>Länge</legend>
-          <div class="segment" role="radiogroup" aria-label="Art des Videos">
-            <button class="segment-knopf ist-an" type="button" data-laenge="einzel"
-                    role="radio" aria-checked="true">Einzelclip</button>
-            <button class="segment-knopf" type="button" data-laenge="story"
-                    role="radio" aria-checked="false">Storyboard</button>
-          </div>
-          <div id="story-regler" hidden>
-            <label class="regler-zeile" for="szenen">
-              <span>Szenen</span><output id="szenen-wert">5</output>
-            </label>
-            <input type="range" id="szenen" min="2" max="12" value="5" class="regler">
-          </div>
-          <p class="hinweis" id="laenge-hinweis"></p>
-        </fieldset>
-
-        <fieldset class="feldgruppe">
-          <legend><label for="videomodell">Modell</label></legend>
-          <select id="videomodell" class="eingabe"></select>
-          <p class="hinweis" id="modell-hinweis"></p>
-        </fieldset>
-
-        <details class="mehr">
+        <details class="mehr aufklapper">
           <summary>Weitere Einstellungen</summary>
           <fieldset class="feldgruppe">
             <legend><label for="verhaeltnis">Bildformat</label></legend>
@@ -186,19 +198,126 @@
             </label>
           </fieldset>
         </details>
+
+        <fieldset class="feldgruppe feldgruppe-leise" id="vorschau-gruppe">
+          <legend>Das geht an Claude</legend>
+          <p class="vorschau" id="briefing-vorschau">Thema wählen und kurz beschreiben,
+            worum es geht.</p>
+        </fieldset>
       </div>
 
       <div class="startleiste">
-        <button class="knopf knopf-haupt" id="btn-start" type="button">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-play"/></svg>
-          <span>Video erzeugen</span>
-        </button>
-        <button class="knopf knopf-abbruch" id="btn-abbruch" type="button" hidden>
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-stopp"/></svg>
-          <span>Abbrechen</span>
-        </button>
-        <p class="startzeile" id="startzeile">Bereit.</p>
-        <div class="reihe" id="reihe" hidden></div>
+        <p class="wegzeile" id="wegzeile" hidden></p>
+        <div class="startknoepfe">
+          <button class="knopf knopf-haupt" id="btn-start" type="button">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-play"/></svg>
+            <span id="btn-start-text">Video erzeugen</span>
+          </button>
+          <button class="knopf knopf-abbruch" id="btn-abbruch" type="button" hidden
+                  title="Laufenden Auftrag abbrechen">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-stopp"/></svg>
+            <span>Abbrechen</span>
+          </button>
+        </div>
+        <div class="startzeile-reihe">
+          <p class="startzeile" id="startzeile">Bereit.</p>
+          <button class="knopf knopf-leise knopf-wiederholen" id="btn-wiederholen"
+                  type="button" hidden
+                  title="Fertige Szenen, Startbilder und Drehbuch werden übernommen — bezahlt wird nur, was noch fehlt.">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-neu"/></svg>Erneut versuchen
+          </button>
+        </div>
+        <div class="reihe" data-reihe hidden></div>
+      </div>
+    </div>
+
+    <!-- ── Seite 2: Webseite → TikTok ────────────────────────────────────── -->
+    <div class="glas glas-hoch" id="seite-webseite" data-seite-inhalt="webseite" hidden>
+      <div class="seitenkopf">
+        <h2>Webseite → TikTok-Werbevideo</h2>
+        <p>Link eingeben. Daraus entsteht ein 9:16-Video mit Aufnahmen der Seite,
+          knackigen Texten und Musik — ohne Guthaben.</p>
+      </div>
+
+      <div class="rollbereich">
+        <fieldset class="feldgruppe">
+          <legend><label for="web-url">Link zur Webseite</label></legend>
+          <form class="link-zeile" id="web-form" autocomplete="off">
+            <span class="link-symbol" aria-hidden="true">
+              <svg class="icon" viewBox="0 0 24 24"><use href="#i-link"/></svg>
+            </span>
+            <input type="text" id="web-url" class="eingabe eingabe-link"
+                   placeholder="meinbetrieb.de" inputmode="url" spellcheck="false">
+            <button class="knopf" id="btn-web-pruefen" type="submit">Prüfen</button>
+          </form>
+          <p class="hinweis" id="web-url-hinweis">Die Startseite eignet sich meist am besten.</p>
+        </fieldset>
+
+        <div class="webkarte" id="web-karte" hidden aria-live="polite"></div>
+
+        <fieldset class="feldgruppe">
+          <legend>Länge</legend>
+          <div class="segment segment-drei" id="web-dauer" role="radiogroup"
+               aria-label="Länge des Werbevideos"></div>
+        </fieldset>
+
+        <fieldset class="feldgruppe">
+          <legend>Stil</legend>
+          <div class="stile" id="web-stile" role="radiogroup" aria-label="Stil"></div>
+        </fieldset>
+
+        <fieldset class="feldgruppe">
+          <legend><label for="web-cta">Handlungsaufforderung <em>optional</em></label></legend>
+          <input type="text" id="web-cta" class="eingabe" maxlength="40"
+                 placeholder="z. B. Jetzt Termin sichern">
+          <p class="hinweis">Leer lassen — dann schlägt Claude eine passende vor.</p>
+        </fieldset>
+
+        <details class="mehr aufklapper">
+          <summary>Feinheiten</summary>
+          <fieldset class="feldgruppe">
+            <legend><label for="web-hinweis">Wunsch an Claude</label></legend>
+            <textarea id="web-hinweis" class="eingabe eingabe-flaeche eingabe-klein" rows="3"
+                      maxlength="300"
+                      placeholder="z. B. Zielgruppe Hausbesitzer, Förderung betonen"></textarea>
+          </fieldset>
+          <fieldset class="feldgruppe">
+            <label class="schalter">
+              <input type="checkbox" id="web-musik" checked>
+              <span class="schalter-spur"><span class="schalter-knauf"></span></span>
+              <span class="schalter-text">Musik
+                <em>Ein Beat im Takt der Schnitte — lizenzfrei, entsteht im Programm.</em></span>
+            </label>
+          </fieldset>
+          <fieldset class="feldgruppe">
+            <label class="schalter" id="web-ki-schalter">
+              <input type="checkbox" id="web-ki">
+              <span class="schalter-spur"><span class="schalter-knauf"></span></span>
+              <span class="schalter-text">KI-Filmszene dazu
+                <em id="web-ki-hinweis">Eine stimmungsvolle Szene über Higgsfield — kostet Credits.</em></span>
+            </label>
+          </fieldset>
+          <fieldset class="feldgruppe">
+            <legend>Zusätzlich erzeugen</legend>
+            <div class="haken-reihe" id="web-formate"></div>
+          </fieldset>
+        </details>
+      </div>
+
+      <div class="startleiste">
+        <div class="startknoepfe">
+          <button class="knopf knopf-haupt" id="btn-web-start" type="button">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-play"/></svg>
+            <span id="btn-web-start-text">Werbevideo erzeugen</span>
+          </button>
+          <button class="knopf knopf-abbruch" data-abbruch type="button" hidden
+                  title="Laufenden Auftrag abbrechen">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-stopp"/></svg>
+            <span>Abbrechen</span>
+          </button>
+        </div>
+        <p class="startzeile" id="web-zeile">Link eingeben und prüfen.</p>
+        <div class="reihe" data-reihe hidden></div>
       </div>
     </div>
   </section>
@@ -270,6 +389,7 @@
 
 <script src="/static/js/kern.js"></script>
 <script src="/static/js/formular.js"></script>
+<script src="/static/js/webseite.js"></script>
 <script src="/static/js/ablauf.js"></script>
 <script src="/static/js/logbuch.js"></script>
 <script src="/static/js/bibliothek.js"></script>

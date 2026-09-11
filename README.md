@@ -7,6 +7,10 @@ Drehbuch mit Bild- und Bewegungsprompts, Higgsfield erzeugt Startbild und Video,
 Ende liegt der fertige Film in allen Formaten, die Sie brauchen — Hochformat für TikTok,
 quadratisch für den Feed, Breitbild für YouTube.
 
+Und aus einem **Link zu einer Webseite** macht es ein TikTok-Werbevideo: Das Programm
+fotografiert die Seite, Claude schreibt Aufhänger, Vorteile und Handlungsaufforderung,
+und daraus entsteht ein animiertes 9:16-Video mit Musik — ohne Guthaben.
+
 ---
 
 ## Installation in drei Schritten
@@ -148,12 +152,47 @@ Der Storyboard-Modus ist der einzige Weg zu Videos über zehn Sekunden: kein
 Higgsfield-Modell liefert längere Clips am Stück. Fünf Szenen à fünf Sekunden ergeben
 rund 25 Sekunden Film — und fünf Aufträge bei Higgsfield.
 
+**Modell.** Angeboten wird nur, was über Ihren Zugang zu haben ist. Über das
+verbundene Abo sind das Kling 2.6, Kling 3.0, Kling 3.0 Turbo, Seedance 2.0, Google
+Veo 3.1 und Minimax Hailuo. Kann ein Modell ein Bildformat nicht (Kling etwa kein 4:3),
+ist es ausgegraut.
+
+**Womit gerade erzeugt wird**, steht direkt über dem Startknopf: „Erzeugt über Ihr
+Higgsfield-Abo“ — oder, gelb, „Probelauf“, wenn ohne Guthaben nur Platzhalter entstehen.
+
 **Mehrere Videos hintereinander.** Es läuft immer nur ein Auftrag — zwei gleichzeitig
-wären zusammen keine Sekunde schneller. Sie müssen aber nicht danebensitzen: Klicken
-Sie einfach wieder auf „Video erzeugen“, dann stellt sich der Auftrag an und startet
-von selbst, sobald der vorige fertig ist. Die Wartenden stehen unter dem Startknopf
-und lassen sich mit dem × einzeln wieder herausnehmen. Höchstens zehn — jeder
+wären zusammen keine Sekunde schneller. Sie müssen aber nicht danebensitzen: Während ein
+Auftrag läuft, heißt der Startknopf **„Einreihen“**. Der Auftrag stellt sich dann an und
+startet von selbst, sobald der vorige fertig ist. Die Wartenden stehen unter dem
+Startknopf und lassen sich mit dem × einzeln wieder herausnehmen. Höchstens zehn — jeder
 kostet später Guthaben.
+
+**Erneut versuchen.** Ist ein Auftrag gescheitert oder abgebrochen, erscheint unter dem
+Startknopf „Erneut versuchen“. Dabei wird übernommen, was schon bezahlt ist — Drehbuch,
+Startbilder, fertige Szenen und Aufträge, die bei Higgsfield noch laufen. Bezahlt wird
+nur, was noch fehlt.
+
+### Webseite → TikTok
+
+Oben in der Mitte umschalten auf **„Webseite → TikTok“**.
+
+1. Link eingeben (die Startseite eignet sich meist am besten) und **Prüfen** klicken.
+   Das Programm zeigt Titel, Beschreibung und Vorschaubild der Seite — so sehen Sie
+   sofort, ob es die richtige ist.
+2. **Länge** (15, 20 oder 30 Sekunden) und **Stil** wählen: energiegeladen, freundlich
+   oder edel.
+3. Wer möchte, gibt eine **Handlungsaufforderung** vor („Jetzt Termin sichern“) — sonst
+   schlägt Claude eine passende vor.
+4. **Werbevideo erzeugen.**
+
+Das Video zeigt die Seite auf einem Handy, scrollt durch sie hindurch, blendet drei
+Vorteile ein und endet mit Ihrem Link. Die Farben kommen von der Webseite, der Beat
+entsteht im Programm und ist lizenzfrei. Unter „Feinheiten“ lässt sich eine
+**KI-Filmszene** über Higgsfield dazunehmen (kostet Credits) und die Musik abschalten.
+
+Claude darf dabei nichts erfinden: Es nennt nur, was auf der Seite steht — keine Preise,
+Siegel oder Bewertungen, die dort nicht vorkommen. Das fertige Video liegt wie jedes
+andere in der Übersicht, samt Text zum Veröffentlichen.
 
 ### Rechts oben: Der Ablauf
 
@@ -235,6 +274,9 @@ Ein Klick auf ein Lämpchen prüft ebenfalls alles durch.
 | „Higgsfield hat den Inhalt abgelehnt.“ | Die Inhaltsprüfung hat angeschlagen. Marken, echte Personen und Gewalt vermeiden. Das Guthaben wird erstattet. |
 | „Es läuft bereits ein Auftrag.“ | Es wird bewusst nur einer gleichzeitig bearbeitet. Abwarten oder abbrechen. |
 | „Higgsfield kennt das eingestellte Modell im Abo nicht.“ | Das Web-Abo führt andere Modellnamen als der API-Zugang. Das Programm übersetzt sie selbst; bleibt die Meldung, im Formular ein anderes Videomodell wählen und oben auf **Update** drücken. |
+| „Higgsfield nimmt den Auftrag in keiner bekannten Form an.“ | Es wurde **nichts abgerechnet** — das Programm prüft das, bevor ein Startbild bezahlt wird. Oben auf **Update** drücken; bleibt es dabei, im Logbuch auf das Kopiersymbol klicken und den Text weitergeben. |
+| „Die Webseite ließ sich nicht fotografieren.“ | Dafür wird Microsoft Edge oder Google Chrome gebraucht. Auf Windows 11 ist Edge immer da; einmal **Update** drücken, dann werden die Hilfspakete nachgezogen. |
+| „Diese Adresse zeigt nicht ins öffentliche Internet.“ | Es lassen sich nur öffentlich erreichbare Webseiten verwenden, keine Adressen im eigenen Netz. |
 | „Das Higgsfield-Abo hat keine Credits mehr.“ | Das Abo selbst ist aufgebraucht. Unter higgsfield.ai nachsehen. Solange erzeugt der Probelauf Platzhalterclips. |
 | „Kein Sprachmodell lieferte ein brauchbares Drehbuch“ | Das Programm hat sich selbst beholfen und läuft weiter — die Videos werden aber sichtbar schwächer. Abhilfe: einmal `claude login` im Terminal ausführen. Das nutzt Ihr Claude-Abo und kostet nichts extra. |
 
@@ -264,15 +306,17 @@ Fenster an. Nichts bricht wortlos ab.
 
 Aufbau, Module, API-Befunde und Wartungshinweise stehen in
 [`docs/DOKUMENTATION.md`](docs/DOKUMENTATION.md), der geprüfte Stand der Higgsfield-API in
-[`docs/API_BEFUND.md`](docs/API_BEFUND.md). Was beim ersten Lauf auf dem Kundenrechner
+[`docs/API_BEFUND.md`](docs/API_BEFUND.md). Was bei den Läufen auf dem Kundenrechner
 schiefging und was daraufhin geändert wurde, steht in
+[`docs/BEFUND_2026-09-11.md`](docs/BEFUND_2026-09-11.md) (jüngster),
+[`docs/BEFUND_2026-09-05.md`](docs/BEFUND_2026-09-05.md) und
 [`docs/BEFUND_2026-08-26.md`](docs/BEFUND_2026-08-26.md).
 
 Tests:
 
 ```
-python -m pytest tests/ -q                    # alle 229 (rund 2 Minuten)
-python -m pytest tests/ -q -m "not langsam"   # nur die 217 schnellen
+python -m pytest tests/ -q                    # alle (rund 6 Minuten)
+python -m pytest tests/ -q -m "not langsam"   # nur die schnellen (wenige Sekunden)
 ```
 
 Start ohne Doppelklick:

@@ -1,14 +1,15 @@
 # MEDIAPIPE WVM — technische Dokumentation
 
-Stand 26.08.2026 · Version 1.0.0
+Stand 11.09.2026 · Version 1.0.0
 
 Diese Datei richtet sich an denjenigen, der das Werkzeug später ändert oder erweitert.
 Für die Bedienung genügt die [README](../README.md).
 
-> **Zuerst lesen, wenn etwas klemmt:** [`BEFUND_2026-08-26.md`](BEFUND_2026-08-26.md).
-> Dort steht, was beim ersten Lauf auf dem Kundenrechner schiefging, woran es lag, was
-> daraufhin geändert wurde und was noch offen ist. Es ist die jüngste Prüfung und geht
-> im Zweifel diesem Dokument vor.
+> **Zuerst lesen, wenn etwas klemmt:** [`BEFUND_2026-09-11.md`](BEFUND_2026-09-11.md) —
+> der dritte Kundenlauf, das Schema des MCP-Dienstes, „Erneut versuchen“ und die neue
+> Funktion „Webseite → TikTok“. Die älteren Befunde
+> ([`05.09.`](BEFUND_2026-09-05.md), [`26.08.`](BEFUND_2026-08-26.md)) bleiben gültig.
+> Der jüngste Befund geht im Zweifel diesem Dokument vor.
 
 ---
 
@@ -23,15 +24,19 @@ app/
 ├── errors.py         Fehlerklassen mit Meldung UND Handlungshinweis
 ├── logbook.py        Logbuch + Ereignisverteilung (ein Kanal für beides)
 ├── higgsfield.py     Platform-API: Bild, Video, Polling, Restzeit, Abbruch
-├── higgsfield_mcp.py Abo-Weg über MCP: OAuth-Anmeldung, Bild, Video,
-│                     Übersetzung der Modellnamen (Platform ≠ MCP)
+├── higgsfield_mcp.py Abo-Weg über MCP: OAuth-Anmeldung, Schema aus tools/list,
+│                     Formkaskade, Vorprüfung, Übersetzung der Modellnamen
 ├── videoquelle.py    Wählt zwischen Platform, Abo und Probelauf
 ├── promptsmith.py    Briefing → Drehbuch (der eigentliche Mehrwert)
 ├── llm/              Sprachmodell-Kette: CLI → API → Ollama
 │   ├── claude_cli.py
 │   ├── claude_api.py
 │   └── lokal.py
-├── pipeline.py       Zustandsmaschine über die fünf Blöcke
+├── pipeline.py       Zustandsmaschine über die fünf Blöcke, Zwischenstand,
+│                     „Erneut versuchen“
+├── webaufnahme.py    Webseite prüfen, fotografieren (Playwright/Edge), auslesen
+├── webwerbung.py     Ablauf „Webseite → TikTok“: Konzept, KI-Szene, Ausgabe
+├── werbeschnitt.py   Motion-Design mit Pillow → ffmpeg, Beat in reinem Python
 ├── jobstore.py       Aufträge in SQLite, überleben Neustarts
 ├── media.py          ffmpeg: Montage, Formate, GIF, Vorschaubild
 ├── library.py        Bibliothek, Pfadsicherheit, Formate nachziehen
@@ -39,15 +44,16 @@ app/
 ├── topics.py         Themen- und Merkmalkatalog (reine Daten)
 └── server.py         Flask-Routen, Ereignisstrom, Dateiauslieferung
 
-static/js/            kern · formular · ablauf · logbuch · bibliothek ·
+static/js/            kern · formular · webseite · ablauf · logbuch · bibliothek ·
                       aktualisierung · abo · start
 static/css/app.css    Design-Tokens und alle Bausteine
 templates/index.html  Struktur + eingebetteter Iconsatz
+requirements-optional.txt  Playwright — beim Update ohne Folgen bei Misserfolg
 
 data/                 auftraege.db, laufzeiten.json, guthabenstand.json,
-                      higgsfield_abo.json
-output/               ein Ordner je Video
-tests/                251 Tests
+                      higgsfield_abo.json, higgsfield_werkzeuge.json
+output/               ein Ordner je Video (mit zwischenstand.json)
+tests/                rund 300 Tests
 ```
 
 **Abhängigkeitsrichtung:** `server → pipeline → {promptsmith, higgsfield, media, library,
@@ -154,10 +160,31 @@ Modell „…“ ist dem Abo-Dienst unbekannt — es wird „…“ genommen.
 Wer diese Zeile sieht, trägt den genannten Namen in `_UEBERSETZUNG` nach; dann entfällt
 der Umweg über den zweiten Versuch.
 
-> Die Kennungen in `_UEBERSETZUNG` sind **nicht nachgemessen** — `mcp.higgsfield.ai`
-> beantwortet ohne Anmeldung jede Anfrage mit `401`, auch `tools/list`. Die
-> Laufzeitabfrage ist deshalb die eigentliche Absicherung, die Tabelle nur der
-> Rückfall.
+> Die Kennungen in `_UEBERSETZUNG` folgen seit dem 11.09.2026 der offiziellen
+> Modellliste der Higgsfield-CLI (`github.com/higgsfield-ai/cli`, `MODELS.md`). Vorher
+> stand dort `kling2_6_pro` — eine Kennung, die es nie gab.
+
+**Das Schema entscheidet, nicht die Tabelle.** Mit angemeldetem Abo liefert `tools/list`
+zu jedem Werkzeug ein JSON-Schema — kostenlos. `higgsfield_mcp.parameterform(werkzeug,
+modell)` liest es (auch `$ref`, `anyOf`, `oneOf`, `allOf`) und liefert Felder, erlaubte
+Werte, die Form von `medias` und die aufgezählten Modelle. `_videoformen()` und
+`_bildformen()` bauen daraus die Parameter; ohne Schema gelten die dokumentierten Formen:
+
+```
+generate_video  params{model, prompt, medias:[{value:<Bildauftrag>, role:"start_image"}],
+                       aspect_ratio, duration}
+generate_image  params{model, prompt, aspect_ratio, count}        ← beim Kunden belegt
+```
+
+`HiggsfieldAbo._einreichen()` probiert die Formen der Reihe nach — **nur** solange der
+Dienst die Form zurückweist (`_eingabefehler`), denn abgewiesene Formen kosten nichts.
+Sobald eine Auftragsnummer kommt, wird nichts mehr geschickt; jeder andere Fehler beendet
+die Suche. Trägt nichts, folgt ein `KonfigurationsFehler`, der den ganzen Lauf beendet.
+
+`HiggsfieldAbo.vorpruefen()` läuft vor dem ersten bezahlten Schritt: Werkzeugliste lesen,
+Modell gegen das Schema prüfen (sonst Ersatz oder Abbruch), Seitenverhältnis und Dauer
+festlegen. Das Ergebnis steht im Logbuch als `Videomodell „…“ · Schema: …`, die volle
+Werkzeugbeschreibung in `data/higgsfield_werkzeuge.json`.
 
 **Für die Übergabe:** `data/higgsfield_abo.json` ist von `.gitignore` erfasst. Wer die
 Anmeldung auf den Kundenrechner mitgeben will, kopiert die Datei mit der `.env` zusammen;
@@ -204,6 +231,7 @@ Zustandswechsel geht als Ereignis an die Oberfläche:
 | `fortschritt` | Balken und Restzeit im aktiven Block |
 | `uebergang` | der wandernde Punkt auf der Verbindung |
 | `startbild` | Vorschaubild im Bild-Block |
+| `vorschau` | Vorschaubild in einem beliebigen Block (Webseiten-Aufnahme) |
 | `auftrag` | gestartet · fertig · fehler · abgebrochen |
 | `warteschlange` | eingereiht · entfernt · geleert |
 | `szene_ausgefallen` | eine Szene hat es nicht geschafft, der Film entsteht ohne sie |
@@ -239,6 +267,25 @@ Was fehlt, steht in `ergebnis["ausgefallen"]`, im Logbuch und auf dem Block „H
 **Abbruch** läuft über ein `threading.Event`, das jeder wartende Aufruf prüft — auch
 mitten im ffmpeg-Lauf und mitten im Polling. Wartende Higgsfield-Aufträge werden
 zusätzlich beim Dienst storniert.
+
+**Vorprüfung.** Bevor das Sprachmodell arbeitet, legt `_schritt_briefing_und_claude` den
+Dienst fest und ruft `pipeline._vorpruefen()`: Passt das Modell zum Weg
+(`VIDEOMODELLE[…]["wege"]`)? Hat der Dienst eine `vorpruefen()`-Methode (der Abo-Weg),
+nennt sie Seitenverhältnis und Dauer, die das Modell annimmt — Drehbuch und Montage
+richten sich danach.
+
+**Zwischenstand und „Erneut versuchen“.** `zwischenstand.json` im Videoordner hält je
+Szene Nummer und Adresse des Startbilds und die Nummer des Videoauftrags, sobald der
+Dienst sie vergibt (Rückruf `gemeldet`). `pipeline.wiederholen(id)` legt einen neuen
+Auftrag mit `wiederholung_von` an; der übernimmt Drehbuch und Ordner. `_eine_szene`
+übernimmt dann fertige Clips, holt laufende Aufträge ab (`fortsetzen`) und nutzt
+Startbilder bis 12 Stunden weiter. Dienste, die die neuen Parameter nicht kennen,
+funktionieren weiter: `pipeline._aufrufen()` lässt unbekannte Argumente weg.
+
+**Webseiten-Aufträge** (`einstellungen.art == "webseite"`) laufen durch dieselbe Reihe und
+denselben Faden, aber durch `webwerbung.ablauf()` mit eigenem Blocksatz
+(`webwerbung.BLOECKE`). Das Ergebnis hat dieselbe Form wie ein Videoauftrag, die
+Bibliothek braucht keine Sonderbehandlung.
 
 ---
 
@@ -383,8 +430,8 @@ nicht mehr auf die Umgebung. (`run.py:voraussetzungen_melden`)
 ## 7. Tests
 
 ```
-python -m pytest tests/ -q                    # 251 Tests, rund 2,5 Minuten
-python -m pytest tests/ -q -m "not langsam"   # 234, ohne echte ffmpeg-Läufe, ~5 Sekunden
+python -m pytest tests/ -q                    # alle, rund 6 Minuten
+python -m pytest tests/ -q -m "not langsam"   # ohne echte ffmpeg-Läufe, wenige Sekunden
 ```
 
 | Datei | Inhalt |
@@ -397,6 +444,8 @@ python -m pytest tests/ -q -m "not langsam"   # 234, ohne echte ffmpeg-Läufe, ~
 | `test_updater.py` | Nur-Vorspulen, Sperre während eines Auftrags, Neustart |
 | `test_videoquelle.py` | Wahl des Videowegs, Guthabengedächtnis, Abo-Anmeldung, **Übersetzung der Modellnamen**, **Übergabe des Startbildes (`medias`)** |
 | `test_kopfzeile.py` | Beschriftungen und Ampelfarben über die echten Routen |
+| `test_abo_attrappe.py` | Abo-Weg gegen einen **strengen MCP-Server** (echtes JSON-RPC über HTTP), der nur die dokumentierte Form annimmt und alles andere mit dem Satz aus dem Kundenlogbuch abweist |
+| `test_webwerbung.py` | Adressprüfung (auch lokale Adressen), Konzept mit/ohne Sprachmodell, Markenfarben, Schnitt mit ffmpeg, Webseiten-Auftrag bis zur Bibliothek |
 | `test_ende_zu_ende.py` | **die ganze Kette** mit Higgsfield-Attrappe |
 
 Der Ende-zu-Ende-Test ist der wichtigste: er ersetzt nur Higgsfield und das
@@ -435,11 +484,12 @@ Oberfläche und Bibliothek nehmen es automatisch auf.
 
 **Neues Videomodell** — drei Schritte, der dritte wird gern vergessen:
 
-1. Mit der Sonde aus Abschnitt 3 prüfen (kostet kein Guthaben).
-2. In `higgsfield.VIDEOMODELLE` und `ERLAUBTE_DAUER` eintragen.
-3. **In `higgsfield_mcp._UEBERSETZUNG` eintragen.** Ohne diesen Schritt funktioniert das
-   Modell über die Platform-API, aber nicht über das Abo — dort heißt es anders. Die
-   Laufzeitabfrage fängt das zwar ab, aber erst nach einem Fehlversuch.
+1. Mit der Sonde aus Abschnitt 3 prüfen (kostet kein Guthaben) — oder für das Abo die
+   offizielle Modellliste bzw. `data/higgsfield_werkzeuge.json` eines angemeldeten Rechners.
+2. In `higgsfield.VIDEOMODELLE` (mit `wege` und `formate`) und `ERLAUBTE_DAUER` eintragen.
+3. **Für das Abo:** Platform-Pfade in `higgsfield_mcp._UEBERSETZUNG`, Abo-Kennungen mit
+   Formaten und Dauern in `higgsfield_mcp._ABO_VIDEO`. Das Schema des Dienstes geht
+   beidem vor; die Tabellen tragen nur, wenn er keins liefert.
 
 **Anderer Videoanbieter** — eine Klasse mit denselben Methoden wie `Higgsfield`
 (`bild`, `video_aus_bild`, `video_aus_text`, `herunterladen`, `abbrechen`, `selbsttest`)
@@ -461,8 +511,13 @@ Die Reihenfolge, in der sich am schnellsten klären lässt, woran es liegt:
    Besonders die Zeilen der Quellen `Videoquelle`, `Sprachmodell` und `Higgsfield (Abo)`.
 2. **Welcher Videoweg läuft gerade?** Die Zeile `Videoerzeugung läuft über: …` steht
    direkt nach dem Start. `Probelauf (ohne Guthaben)` heißt: die Clips sind Platzhalter.
-3. **Steht `Modell „…“ ist dem Abo-Dienst unbekannt`?** Dann hat sich die Benennung bei
-   Higgsfield geändert. Der genannte Ersatzname gehört in `_UEBERSETZUNG`.
+3. **Die Zeile `Videomodell „…“ · Schema: …` lesen.** Sie zeigt, was der Dienst für
+   `generate_video` erwartet. Steht `generate_video: angenommen … in der Form „…“` dahinter,
+   hat die Kaskade gegriffen — diese Form gehört dann nach vorn. Steht
+   `Abgewiesene Formen: …`, liegen dort alle Antworten des Dienstes.
+   `data/higgsfield_werkzeuge.json` enthält die vollständige Werkzeugbeschreibung.
+   Steht `„…“ führt der Abo-Dienst nicht — es wird „…“ genommen`, hat sich die Benennung
+   geändert; der Name gehört in `_UEBERSETZUNG`.
 4. **Schrieb ein Sprachmodell das Drehbuch?** Die Erfolgszeile nennt den Weg
    (`Claude (Abo)`, `Claude (API)`, `Lokal (…)`). Steht dort stattdessen
    `einfaches Drehbuch wird selbst erstellt`, war keiner erreichbar — die Videoqualität

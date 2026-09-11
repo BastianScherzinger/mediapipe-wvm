@@ -1207,6 +1207,222 @@ select.eingabe option { background: var(--grund-2); color: var(--text); }
 .meldung[data-art="erfolg"] { border-color: rgba(52,211,153,.45); color: #6EE7B7; }
 @keyframes hochkommen { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
+/* ── 10b  Umbau September 2026 ───────────────────────────────────────────────
+   Seitennavigation, neue Formularordnung, Webseiten-Seite. Alles hier baut auf den
+   Tokens oben auf — keine neuen Farben außer den Stilpunkten der Webseiten-Seite. */
+
+/* Kopfzeile: Marke · Bereichswahl · Zustand. Die Bereichswahl steht mittig, weil sie
+   die eine Entscheidung ist, die alles darunter verändert. */
+.kopf { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
+.seitenwahl { justify-self: center; }
+.kopf-status { justify-self: end; }
+.kopf .knopf, .lampe { white-space: nowrap; }
+
+.seitenwahl {
+  display: flex; gap: 3px;
+  padding: 3px;
+  background: rgba(0,0,0,.3);
+  border: 1px solid var(--rand);
+  border-radius: 99px;
+}
+.seitenwahl-knopf {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 16px;
+  border: 0; border-radius: 99px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12.5px; font-weight: 600;
+  cursor: pointer;
+  transition: background var(--takt) var(--kurve), color var(--takt) var(--kurve);
+}
+.seitenwahl-knopf .icon { width: 15px; height: 15px; }
+.seitenwahl-knopf:hover { color: var(--text); }
+.seitenwahl-knopf.ist-an {
+  background: var(--akzent-schwach);
+  color: var(--akzent-2);
+  box-shadow: inset 0 0 0 1px rgba(34,211,238,.35);
+}
+
+.spalte-links > .glas-hoch[hidden] { display: none !important; }
+
+/* Zwei Felder nebeneinander — Länge und Modell gehören zusammen gelesen. */
+.zweispaltig { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: var(--a3); }
+.zweispaltig .feldgruppe { margin-bottom: var(--a2); }
+.zweispaltig .segment-knopf { padding: 8px 4px; font-size: 12.5px; white-space: nowrap; }
+.hinweis-block { margin: 0 0 2px; }
+#modell-hinweis { margin: 2px 0 var(--a4); }
+#story-regler .regler-zeile { margin-top: var(--a1); }
+
+legend em, summary em {
+  margin-left: 6px;
+  font-style: normal; font-weight: 500;
+  letter-spacing: 0; text-transform: none;
+  color: var(--text-3); opacity: .75;
+}
+
+/* Aufklapper: Stil & Anmutung, weitere Einstellungen, Feinheiten. Eine leise Karte
+   statt eines „+“ im Fließtext — man sieht, dass dort etwas liegt. */
+.aufklapper {
+  margin: 0 0 var(--a4);
+  border: 1px solid var(--rand);
+  border-radius: var(--rund-klein);
+  background: rgba(0,0,0,.14);
+}
+.aufklapper > summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px; font-weight: 600;
+  color: var(--text-2);
+}
+.aufklapper > summary::before {
+  content: "";
+  width: 7px; height: 7px;
+  border-right: 1.75px solid var(--text-3);
+  border-bottom: 1.75px solid var(--text-3);
+  transform: rotate(-45deg);
+  transition: transform var(--takt) var(--kurve);
+  margin-right: 2px;
+}
+.aufklapper[open] > summary::before { content: ""; transform: rotate(45deg); }
+.aufklapper > summary:hover { color: var(--text); }
+.aufklapper > :not(summary) { margin: 0 12px; }
+.aufklapper > :last-child { margin-bottom: 12px; }
+.aufklapper > .feldgruppe:first-of-type, .aufklapper > #argumentgruppen { margin-top: 2px; }
+.zaehlmarke {
+  min-width: 18px; height: 18px; padding: 0 5px;
+  display: inline-grid; place-items: center;
+  border-radius: 99px;
+  background: var(--akzent); color: #04252C;
+  font-size: 10.5px; font-weight: 700;
+}
+
+.feldgruppe-leise .vorschau { font-size: 12.5px; color: var(--text-3); }
+
+/* Startleiste: Weg, Knöpfe, Statuszeile, Reihe. */
+.startknoepfe { display: flex; gap: var(--a2); width: 100%; }
+.startknoepfe .knopf-abbruch { flex: 0 0 auto; }
+.startzeile-reihe { flex: 1 1 100%; display: flex; align-items: center; gap: var(--a2); min-width: 0; }
+.startzeile-reihe .startzeile { flex: 1 1 auto; min-width: 0; }
+.knopf-wiederholen { flex: 0 0 auto; color: var(--akzent-2); border-color: rgba(34,211,238,.35); }
+
+.wegzeile {
+  flex: 1 1 100%;
+  display: flex; align-items: center; gap: 8px;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.wegzeile::before {
+  content: "";
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-3);
+}
+.wegzeile[data-weg="abo"]::before, .wegzeile[data-weg="platform"]::before {
+  background: var(--erfolg); box-shadow: 0 0 8px rgba(52,211,153,.55);
+}
+.wegzeile[data-weg="demo"] { color: #FBD46A; }
+.wegzeile[data-weg="demo"]::before { background: var(--warnung); box-shadow: 0 0 8px rgba(251,191,36,.5); }
+
+.reihe-kopf {
+  display: flex; align-items: center; gap: 6px;
+  margin: 2px 0 0;
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-3);
+}
+.reihe-kopf .icon { width: 13px; height: 13px; }
+
+/* ── Webseite → TikTok ── */
+.seitenkopf {
+  flex: 0 0 auto;
+  padding: var(--a4) var(--a4) var(--a3);
+  border-bottom: 1px solid var(--rand);
+}
+.seitenkopf h2 { font-size: 15px; letter-spacing: -.01em; }
+.seitenkopf p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text-3); }
+
+.link-zeile {
+  position: relative;
+  display: flex; gap: var(--a2);
+}
+.link-symbol {
+  position: absolute; left: 11px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+}
+.link-symbol .icon { width: 16px; height: 16px; }
+.eingabe-link { padding-left: 36px; font-size: 14px; }
+.link-zeile .knopf { flex: 0 0 auto; }
+
+.webkarte {
+  display: flex; flex-direction: column;
+  margin: -8px 0 var(--a5);
+  border: 1px solid rgba(52,211,153,.28);
+  border-radius: var(--rund-klein);
+  background: rgba(0,0,0,.24);
+  overflow: hidden;
+  animation: aufblenden 320ms var(--kurve);
+}
+.webkarte[data-art="fehler"] { border-color: rgba(248,113,113,.4); }
+.webkarte[data-art="fehler"] .webkarte-titel { color: #FCA5A5; }
+.webkarte-bild { width: 100%; aspect-ratio: 1.91 / 1; object-fit: cover; display: block; background: #0B0D10; }
+.webkarte-inhalt { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; }
+.webkarte-kopf { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.webkarte-icon { width: 16px; height: 16px; border-radius: 3px; flex: 0 0 auto; }
+.webkarte-host { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.webkarte-marke {
+  margin-left: auto; flex: 0 0 auto;
+  padding: 2px 8px; border-radius: 99px;
+  background: rgba(52,211,153,.1); color: #8DE9C6;
+  font-size: 10.5px; font-variant-numeric: tabular-nums;
+}
+.webkarte-titel { margin: 2px 0 0; font-size: 13.5px; font-weight: 600; line-height: 1.35; }
+.webkarte-text {
+  margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-3);
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+}
+
+.segment-drei { grid-template-columns: repeat(3, 1fr); }
+
+.stile { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--a2); }
+.stil {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 10px;
+  background: rgba(0,0,0,.2);
+  border: 1px solid var(--rand);
+  border-radius: var(--rund-klein);
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--takt) var(--kurve), background var(--takt) var(--kurve),
+              transform var(--takt) var(--kurve);
+}
+.stil:hover { border-color: var(--rand-hell); transform: translateY(-1px); }
+.stil-punkt {
+  width: 18px; height: 6px; border-radius: 99px;
+  background: var(--stilfarbe);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--stilfarbe) 55%, transparent);
+}
+.stil-name { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.stil-text { font-size: 11px; line-height: 1.35; color: var(--text-3); }
+.stil.ist-an {
+  border-color: color-mix(in srgb, var(--stilfarbe) 60%, transparent);
+  background: color-mix(in srgb, var(--stilfarbe) 10%, transparent);
+}
+
+.eingabe-klein { min-height: 72px; }
+.schalter.ist-aus { opacity: .5; cursor: not-allowed; }
+
+/* Ablauf etwas kompakter — der Platz gehört den Videos darunter. */
+.ablauf { padding: var(--a3) var(--a4); }
+.block { padding: 10px 8px; gap: 7px; }
+.block-symbol { width: 38px; height: 38px; }
+.block-vorschau[data-hoch] {
+  width: auto; height: 96px; max-width: 100%;
+  aspect-ratio: 9 / 16;
+  align-self: center;
+}
+
 /* ── 11  Anpassungen ─────────────────────────────────────────────────────── */
 @media (max-width: 1180px) {
   .raster { grid-template-columns: 1fr; height: auto; }

@@ -197,6 +197,11 @@ _SEITENVERHAELTNISSE = ("16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2")
 def einstellungen_pruefen(roh: dict) -> Einstellungen:
     """Nimmt die Formulardaten entgegen und macht daraus einen gültigen Auftrag.
     Alles, was fehlt, bekommt einen sinnvollen Wert; alles Unsinnige wird abgelehnt."""
+    if str(roh.get("art") or "") == "webseite":
+        # Der Link steht an der Stelle des Briefings: Er ist das, woraus das Video entsteht.
+        from . import webwerbung
+        return webwerbung.einstellungen_pruefen(roh, Einstellungen)
+
     briefing = str(roh.get("briefing") or "").strip()
     if len(briefing) < 3:
         raise errors.EingabeFehler(
@@ -218,11 +223,6 @@ def einstellungen_pruefen(roh: dict) -> Einstellungen:
         verhaeltnis = "16:9"
 
     gewuenschte = [f for f in (roh.get("formate") or []) if f in media.FORMATE]
-
-    if str(roh.get("art") or "") == "webseite":
-        # Der Link steht an der Stelle des Briefings: Er ist das, woraus das Video entsteht.
-        from . import webwerbung
-        return webwerbung.einstellungen_pruefen(roh, Einstellungen)
 
     return Einstellungen(
         briefing=briefing,
@@ -403,8 +403,10 @@ def _bearbeiten(auftrag_id: str, e: Einstellungen, abbruch: threading.Event) -> 
             ergebnis = _schritt_ausgabe(auftrag_id, e, drehbuch, szenenclips, ordner,
                                         abbruch, ausgefallen)
 
+        # `fehler` ausdrücklich leeren: Ein fertiger Auftrag trägt keinen Fehler mehr,
+        # auch wenn zwischendurch einer vermerkt wurde.
         jobstore.aktualisieren(auftrag_id, zustand=jobstore.FERTIG, block="ausgabe",
-                               ergebnis=ergebnis)
+                               ergebnis=ergebnis, fehler={})
         dauer = time.monotonic() - begonnen
         logbook.erfolg(QUELLE, f"Fertig in {int(dauer // 60)} min {int(dauer % 60)} s: "
                                f"{Path(ergebnis['film']).name}", job=auftrag_id)
@@ -421,8 +423,12 @@ def _bearbeiten(auftrag_id: str, e: Einstellungen, abbruch: threading.Event) -> 
     except errors.StudioFehler as fehler:
         jobstore.aktualisieren(auftrag_id, zustand=jobstore.FEHLER, fehler=fehler.als_dict())
         logbook.fehler(QUELLE, f"{fehler.meldung} {fehler.hinweis}".strip(), job=auftrag_id)
-        _block(auftrag_id, jobstore.holen(auftrag_id).block if jobstore.holen(auftrag_id)
-               else "briefing", "fehler", fehler.meldung)
+        # Einmal holen, nicht zweimal: Wurde der Auftrag zwischendurch gelöscht, riss das
+        # zweite `holen()` mit einem AttributeError den Arbeitsfaden mit — im Fehlerpfad,
+        # also genau dann, wenn die Oberfläche die Meldung am dringendsten braucht.
+        eintrag = jobstore.holen(auftrag_id)
+        _block(auftrag_id, eintrag.block if eintrag is not None else "briefing", "fehler",
+               fehler.meldung)
         logbook.ereignis("auftrag", {"aktion": "fehler", "fehler": fehler.als_dict()},
                          job=auftrag_id)
 

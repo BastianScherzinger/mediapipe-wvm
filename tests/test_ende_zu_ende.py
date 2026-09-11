@@ -462,6 +462,66 @@ def test_format_spaeter_nachziehen(studio):
 
 
 @pytest.mark.langsam
+def test_wiederholen_bezahlt_nichts_doppelt(studio, monkeypatch):
+    """„Erneut versuchen“ nach einem Abbruch in Szene 3 von 3.
+
+    Beim ersten Lauf sind drei Startbilder und zwei Clips bezahlt. Der zweite Lauf darf
+    davon nichts neu bestellen: Drehbuch, beide Clips und das dritte Startbild werden
+    übernommen, nur der dritte Clip entsteht neu. Bis zum 10.09.2026 hätte „nochmal“
+    ein neues Drehbuch und drei neue Startbilder gekostet.
+    """
+    drehbuecher = []
+
+    def zaehlend(*_a, **_k):
+        drehbuecher.append(1)
+        return promptsmith.llm.Antwort(json.dumps(DREHBUCH), "cli", "test", 0.1)
+
+    monkeypatch.setattr(promptsmith.llm, "erzeuge", zaehlend)
+    echt = studio.video_aus_bild
+    einmal = {"gescheitert": False}
+
+    def dritter_scheitert(prompt, bild_url, **kw):
+        if studio.videos == 2 and not einmal["gescheitert"]:
+            einmal["gescheitert"] = True
+            studio.videos += 1
+            raise errors.GuthabenFehler("Kein Guthaben mehr.", "Aufladen.")
+        # Die Attrappe kennt `gemeldet`/`fortsetzen` nicht — weglassen wie die Pipeline.
+        return pipeline._aufrufen(echt, prompt, bild_url, **kw)
+
+    monkeypatch.setattr(studio, "video_aus_bild", dritter_scheitert)
+
+    erster = pipeline.starten({"briefing": "Test Wiederholung", "szenen": 3,
+                               "sekunden": 5, "formate": []})
+    gescheitert = warten_bis_fertig(erster.id)
+    assert gescheitert.zustand == jobstore.FEHLER
+    assert studio.bilder == 3
+
+    zweiter, sofort = pipeline.wiederholen(erster.id)
+    assert sofort
+    fertig = warten_bis_fertig(zweiter.id)
+
+    assert fertig.zustand == jobstore.FERTIG, fertig.fehler
+    assert fertig.ergebnis["szenen"] == 3
+    assert studio.bilder == 3, "kein Startbild darf zweimal bezahlt werden"
+    assert studio.videos == 4, "nur der fehlende dritte Clip darf neu entstehen"
+    assert len(drehbuecher) == 1, "das Drehbuch wird übernommen, nicht neu geschrieben"
+    assert fertig.ordner == gescheitert.ordner
+
+
+@pytest.mark.langsam
+def test_modell_nur_im_abo_bricht_vor_dem_ersten_bild_ab(studio):
+    """Kling 3.0 gibt es nur über das Abo. Läuft die Platform-API, muss das auffallen,
+    bevor ein Startbild bezahlt ist — nicht danach."""
+    auftrag = pipeline.starten({"briefing": "Test falscher Weg", "szenen": 2,
+                                "sekunden": 5, "videomodell": "kling3_0", "formate": []})
+    fertig = warten_bis_fertig(auftrag.id)
+    assert fertig.zustand == jobstore.FEHLER
+    assert fertig.fehler["art"] == "konfiguration"
+    assert "Abo" in fertig.fehler["meldung"]
+    assert studio.bilder == 0
+
+
+@pytest.mark.langsam
 def test_auftrag_ueberlebt_einen_neustart(studio):
     """Nach einem Absturz darf kein Auftrag als „läuft“ hängenbleiben."""
     auftrag = pipeline.starten({"briefing": "Test Neustart", "szenen": 6,

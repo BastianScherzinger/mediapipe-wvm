@@ -5,6 +5,10 @@
  * Dekoration: es ist die einzige Stelle, an der man auf einen Blick sieht, wo der
  * Auftrag steht, ohne das Logbuch lesen zu müssen.
  *
+ * Es gibt zwei Blocksätze: den des Video-Studios (Briefing → Claude → Startbild →
+ * Higgsfield → Ausgabe) und den der Webseiten-Werbung (Webseite → Aufnahmen → Konzept →
+ * Schnitt → Ausgabe). Welcher gezeigt wird, entscheidet der laufende Auftrag.
+ *
  * Die Anzeige folgt ausschließlich Ereignissen vom Server. Sie fragt nichts ab und
  * erfindet nichts — was hier leuchtet, passiert wirklich gerade.
  */
@@ -14,33 +18,46 @@
   const { $, el, icon } = MPW;
 
   const SYMBOLE = {
-    briefing: "briefing",
-    claude: "claude",
-    bild: "bild",
-    video: "film",
-    ausgabe: "ausgabe",
+    briefing: "briefing", claude: "claude", bild: "bild", video: "film", ausgabe: "ausgabe",
+    pruefen: "link", aufnahme: "handy", konzept: "claude", schnitt: "film",
   };
 
+  const saetze = { video: [], webseite: [] };
   let bloecke = [];
   const knoten = new Map();          // Blockkennung → Elemente
   let restUhr = null;
+  let verdrahtet = false;
 
-  MPW.ablauf = { aufbauen, zuruecksetzen, notiz };
+  MPW.ablauf = { aufbauen, zuruecksetzen, notiz, fuerAuftrag };
 
   /* ── Aufbau ────────────────────────────────────────────────────────────── */
 
-  function aufbauen(liste) {
-    bloecke = liste;
-    const behaelter = $("#ablauf");
-    const teile = [];
+  function aufbauen(liste, webseitenListe) {
+    saetze.video = liste || [];
+    saetze.webseite = webseitenListe || [];
+    zeichnen(saetze.video);
+    if (!verdrahtet) { verdrahten(); verdrahtet = true; }
+  }
 
+  /** Stellt den Blocksatz passend zum Auftrag ein — nur, wenn er sich ändert. */
+  function fuerAuftrag(auftrag) {
+    const art = auftrag?.einstellungen?.art === "webseite" ? "webseite" : "video";
+    const liste = saetze[art].length ? saetze[art] : saetze.video;
+    if (liste.map((b) => b.kennung).join() !== bloecke.map((b) => b.kennung).join()) {
+      zeichnen(liste);
+    }
+  }
+
+  function zeichnen(liste) {
+    bloecke = liste;
+    knoten.clear();
+    stoppeZaehler();
+    const teile = [];
     liste.forEach((block, stelle) => {
       if (stelle > 0) teile.push(verbindungBauen(liste[stelle - 1].kennung, block.kennung));
       teile.push(blockBauen(block));
     });
-
-    behaelter.replaceChildren(...teile);
-    verdrahten();
+    $("#ablauf").replaceChildren(...teile);
   }
 
   function blockBauen(block) {
@@ -122,22 +139,26 @@
       leitung.dataset.genommen = "ja";
     });
 
-    MPW.beiEreignis("startbild", (nachricht) => {
-      const eintrag = knoten.get("bild");
-      if (!eintrag || !nachricht.datei) return;
+    const vorschauZeigen = (block, datei, text, hoch) => {
+      const eintrag = knoten.get(block);
+      if (!eintrag || !datei) return;
       vorschauEntfernen(eintrag);
       eintrag.vorschau = el("img", {
-        klasse: "block-vorschau",
-        src: "/medien/" + nachricht.datei,
-        alt: "Startbild der Szene " + (nachricht.szene || ""),
-        loading: "lazy",
+        klasse: "block-vorschau", src: "/medien/" + datei, alt: text, loading: "lazy",
+        daten: hoch ? { hoch: "ja" } : {},
       });
       eintrag.wurzel.append(eintrag.vorschau);
-    });
+    };
+    MPW.beiEreignis("startbild", (n) =>
+      vorschauZeigen("bild", n.datei, "Startbild der Szene " + (n.szene || "")));
+    MPW.beiEreignis("vorschau", (n) =>
+      vorschauZeigen(n.block, n.datei, "Aufnahme der Webseite", true));
 
     MPW.beiEreignis("auftrag", (nachricht) => {
-      if (nachricht.aktion === "gestartet") zuruecksetzen();
-      else if (nachricht.aktion === "fertig") { stoppeZaehler(); notiz("Fertig."); }
+      if (nachricht.aktion === "gestartet") {
+        fuerAuftrag(nachricht.auftrag);
+        zuruecksetzen();
+      } else if (nachricht.aktion === "fertig") { stoppeZaehler(); notiz("Fertig."); }
       else if (nachricht.aktion === "abgebrochen") { stoppeZaehler(); notiz("Abgebrochen."); }
       else if (nachricht.aktion === "fehler") {
         stoppeZaehler();
