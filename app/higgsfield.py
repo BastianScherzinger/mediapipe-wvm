@@ -123,6 +123,15 @@ class _Guthabenstand:
 _guthaben = _Guthabenstand(config.DATA_DIR / "guthabenstand.json")
 
 
+def _unklar(grund: str) -> errors.UnklarFehler:
+    return errors.UnklarFehler(
+        "Higgsfield hat auf den Auftrag nicht geantwortet — ob er angenommen wurde, ist "
+        "unklar.",
+        "Es wird nicht automatisch neu bestellt, damit nichts doppelt bezahlt wird. Bitte "
+        "unter cloud.higgsfield.ai nachsehen und dann „Erneut versuchen“ klicken. "
+        f"(Technischer Grund: {grund})", ursprung=QUELLE)
+
+
 # ── Ergebnis ─────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -203,16 +212,25 @@ class Higgsfield:
                 else:
                     antwort = klient.post(url, headers=self._kopfzeilen(),
                                           json=rumpf if rumpf is not None else {})
-        except httpx.TimeoutException as fehler:
-            raise errors.ZeitFehler(
-                f"Higgsfield hat innerhalb von {grenze} Sekunden nicht geantwortet.",
-                "Meist vorübergehend — das Programm versucht es erneut.",
-                ursprung=QUELLE, details={"url": pfad}) from fehler
-        except httpx.HTTPError as fehler:
+        except (httpx.ConnectError, httpx.ConnectTimeout) as fehler:
             raise errors.NetzFehler(
                 "Keine Verbindung zu Higgsfield.",
                 "Internetverbindung prüfen.",
                 ursprung=QUELLE, details={"grund": type(fehler).__name__}) from fehler
+        except httpx.TimeoutException as fehler:
+            # `gesendet`: Die Anfrage ist raus, nur die Antwort fehlt. Bei einer Bestellung
+            # heißt das: vielleicht angenommen und bezahlt — `auftrag_erstellen` wiederholt
+            # dann nicht.
+            raise errors.ZeitFehler(
+                f"Higgsfield hat innerhalb von {grenze} Sekunden nicht geantwortet.",
+                "Meist vorübergehend — das Programm versucht es erneut.",
+                ursprung=QUELLE, details={"url": pfad, "gesendet": True}) from fehler
+        except httpx.HTTPError as fehler:
+            raise errors.NetzFehler(
+                "Keine Verbindung zu Higgsfield.",
+                "Internetverbindung prüfen.",
+                ursprung=QUELLE, details={"grund": type(fehler).__name__,
+                                          "gesendet": True}) from fehler
 
         text = antwort.text or ""
         try:
@@ -254,7 +272,17 @@ class Higgsfield:
         self._pruefe_schluessel()
 
         def einmal():
-            code, daten, text = self._anfrage("POST", modell, rumpf)
+            try:
+                code, daten, text = self._anfrage("POST", modell, rumpf)
+            except (errors.ZeitFehler, errors.NetzFehler) as fehler:
+                if fehler.details.get("gesendet"):
+                    raise _unklar(fehler.meldung) from fehler
+                raise
+            # 5xx außer 503 heißt: Der Dienst hat die Anfrage bekommen und ist dabei
+            # gescheitert — womöglich nachdem der Auftrag angelegt war. 503 und 429 sagen
+            # dagegen ausdrücklich „nicht angenommen“ und dürfen wiederholt werden.
+            if code >= 500 and code != 503:
+                raise _unklar(f"Code {code}")
             if code >= 400:
                 # Jeder echte Auftrag ist zugleich die einzige verlässliche Auskunft über
                 # den Kontostand — also wird sie festgehalten.
@@ -371,7 +399,8 @@ class Higgsfield:
                     "Higgsfield konnte den Auftrag nicht ausführen.",
                     (f"Begründung: {grund}" if grund else
                      "Keine Begründung geliefert. Das Guthaben wird bei Fehlschlag erstattet."),
-                    ursprung=QUELLE, details={"request_id": request_id})
+                    ursprung=QUELLE, details={"request_id": request_id,
+                                              "endzustand": zustand})
 
             if zustand in _ABGEBROCHEN:
                 raise errors.AbbruchFehler("Der Auftrag wurde storniert.", ursprung=QUELLE)

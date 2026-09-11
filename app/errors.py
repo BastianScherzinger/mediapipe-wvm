@@ -76,6 +76,18 @@ class AnbieterFehler(StudioFehler):
     art = "anbieter"
 
 
+class UnklarFehler(StudioFehler):
+    """Ein Auftrag ist abgeschickt, aber die Antwort kam nicht an — ob der Dienst ihn
+    angenommen und abgerechnet hat, ist unbekannt.
+
+    **Nie wiederholen.** Genau hier entstünde sonst ein doppelt bezahlter Auftrag: Die
+    Antwort kommt nach 90 Sekunden oder als 502 vom Gateway, obwohl der Dienst längst
+    rechnet. Die Ablaufsteuerung beendet den Lauf, statt Szene für Szene weitere
+    möglicherweise bezahlte Aufträge ins Leere zu schicken.
+    """
+    art = "unklar"
+
+
 class InhaltFehler(StudioFehler):
     """Der Auftrag wurde inhaltlich abgelehnt (Moderation). Wiederholen ist zwecklos,
     der Prompt muss geändert werden."""

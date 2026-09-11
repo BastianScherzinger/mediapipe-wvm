@@ -72,6 +72,26 @@ def test_ampel_ist_gelb_bei_leerem_guthaben(besucher, monkeypatch):
     assert daten["startbereit"] is True
 
 
+def test_fremde_webseite_darf_nichts_ausloesen(besucher):
+    """Jede Webseite im Browser des Kunden könnte dem lokalen Server eine POST-Anfrage
+    schicken — „Update“, „Neustart“, „Erneut versuchen“. Der Browser nennt dabei seine
+    Herkunft; eine fremde wird abgewiesen."""
+    fremd = besucher.post("/api/wege-zuruecksetzen",
+                          headers={"Origin": "https://boese.example"})
+    assert fremd.status_code == 403
+    anderer_port = besucher.post("/api/wege-zuruecksetzen",
+                                 headers={"Origin": "http://localhost:9999"})
+    assert anderer_port.status_code == 403
+    eigene = besucher.post("/api/wege-zuruecksetzen", headers={"Origin": "http://localhost"})
+    assert eigene.status_code == 200
+
+
+def test_fremder_hostname_wird_abgewiesen(besucher):
+    """Schutz gegen DNS-Rebinding: Nur 127.0.0.1 und localhost sind der eigene Server."""
+    assert besucher.get("/api/lebt", base_url="http://boese.example").status_code == 403
+    assert besucher.get("/api/lebt").status_code == 200
+
+
 def test_leeres_guthaben_haelt_das_programm_nicht_auf(besucher, monkeypatch):
     """Nur ein „fehler“ darf `startbereit` kippen. Sonst würde die Oberfläche beim
     Start eine Fehlermeldung zeigen, obwohl nur der Topf leer ist."""

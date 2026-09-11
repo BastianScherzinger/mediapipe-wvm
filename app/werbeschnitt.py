@@ -730,6 +730,10 @@ def _bilder_an_ffmpeg(film: _Film, ziel: Path, von: float, bis: float,
     befehl = [programm, "-hide_banner", "-loglevel", "error", "-y",
               "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{BREITE}x{HOEHE}",
               "-r", str(BILDRATE), "-i", "-",
+              # Quadratische Pixel ausdrücklich setzen: Rohbilder haben kein
+              # Pixelseitenverhältnis, und der concat-Filter weist Teile mit
+              # abweichendem ab — dann scheiterte ausgerechnet der Film mit KI-Szene.
+              "-vf", "setsar=1",
               # „faster“ statt „medium“: halbiert die Kodierzeit, und bei Flächen und
               # Schrift, wie sie hier entstehen, sieht man bei crf 19 keinen Unterschied.
               "-c:v", "libx264", "-preset", "faster", "-crf", "19",
@@ -742,7 +746,6 @@ def _bilder_an_ffmpeg(film: _Film, ziel: Path, von: float, bis: float,
         try:
             for i in range(anzahl):
                 if abbruch is not None and abbruch.is_set():
-                    lauf.kill()
                     raise errors.AbbruchFehler("Schnitt abgebrochen.", ursprung=QUELLE)
                 bild = film.bild(von + i / BILDRATE)
                 lauf.stdin.write(bild.tobytes())
@@ -750,18 +753,57 @@ def _bilder_an_ffmpeg(film: _Film, ziel: Path, von: float, bis: float,
                     melden(anteil_von + (anteil_bis - anteil_von) * i / anzahl)
             lauf.stdin.close()
             lauf.wait(timeout=600)
-        except (BrokenPipeError, OSError) as fehler_os:
+        except BaseException as fehler_lauf:
+            # Jeder Fehler beim Zeichnen muss ffmpeg beenden — sonst wartet es ewig an
+            # der offenen Eingabe, hält die ffmpeg-Sperre und den Arbeitsordner fest.
             lauf.kill()
+            try:
+                lauf.wait(timeout=10)
+            except Exception:
+                pass
+            if isinstance(fehler_lauf, (errors.StudioFehler, KeyboardInterrupt)):
+                raise
             text = fehlerdatei.read_text(encoding="utf-8", errors="replace")[:300] \
                 if fehlerdatei.exists() else ""
-            raise errors.VerarbeitungsFehler("Der Videoschnitt ist abgebrochen.",
-                                             text or str(fehler_os), ursprung=QUELLE)
+            raise errors.VerarbeitungsFehler(
+                "Der Videoschnitt ist abgebrochen.",
+                text or f"{type(fehler_lauf).__name__}: {str(fehler_lauf)[:200]}",
+                ursprung=QUELLE) from fehler_lauf
     text = fehlerdatei.read_text(encoding="utf-8", errors="replace") if \
         fehlerdatei.exists() else ""
     fehlerdatei.unlink(missing_ok=True)
     if lauf.returncode != 0:
         raise errors.VerarbeitungsFehler("Der Videoschnitt ist fehlgeschlagen.",
                                          " ".join(text.split())[:300], ursprung=QUELLE)
+
+
+def _mit_ki_szene(film: "_Film", ki_clip: Path, arbeit: Path, ziel: Path,
+                  schnitte: list[float], abbruch, melden) -> list[float]:
+    """Vorderteil, KI-Szene und Hinterteil zu einem stummen Film verbinden."""
+    nach_enthuellung = film.plan[2][1]
+    vorne, hinten, ki = arbeit / "vorne.mp4", arbeit / "hinten.mp4", arbeit / "ki.mp4"
+    _bilder_an_ffmpeg(film, vorne, 0.0, nach_enthuellung, abbruch, melden, 0.0, 0.35)
+    media._normalisieren(ki_clip, ki, breite=BREITE, hoehe=HOEHE, bildrate=BILDRATE,
+                         abbruch=abbruch)
+    _bilder_an_ffmpeg(film, hinten, nach_enthuellung, film.dauer, abbruch, melden, 0.4, 0.85)
+    teile = [vorne, ki, hinten]
+    eingaben: list[str] = []
+    for teil in teile:
+        eingaben += ["-i", str(teil)]
+    # Jeden Teil vor dem Verbinden auf dasselbe Raster bringen — auch wenn es schon
+    # stimmt. Der concat-Filter bricht bei der kleinsten Abweichung ab.
+    vorbereitung = ";".join(f"[{i}:v]scale={BREITE}:{HOEHE},setsar=1,fps={BILDRATE},"
+                            f"format=yuv420p[t{i}]" for i in range(len(teile)))
+    kette = "".join(f"[t{i}]" for i in range(len(teile)))
+    media._ffmpeg([*eingaben, "-filter_complex",
+                   f"{vorbereitung};{kette}concat=n={len(teile)}:v=1:a=0[v]",
+                   "-map", "[v]", "-c:v", "libx264", "-preset", "faster", "-crf", "19",
+                   "-pix_fmt", "yuv420p", str(ziel)],
+                  beschreibung="Szenen verbinden", abbruch=abbruch)
+    ki_dauer = media.angaben(ki).dauer
+    neu = [s if s < nach_enthuellung else s + ki_dauer for s in schnitte]
+    neu.insert(2, nach_enthuellung + ki_dauer)
+    return sorted(neu)
 
 
 def rendern(aufnahme, konzept: Konzept, ziel: Path, *, dauer: int = 20,
@@ -774,40 +816,27 @@ def rendern(aufnahme, konzept: Konzept, ziel: Path, *, dauer: int = 20,
     try:
         logbook.info(QUELLE, "Szenen werden gezeichnet …")
         film = _Film(aufnahme, konzept, float(dauer))
-        teile: list[Path] = []
         schnitte = [beginn for _, beginn, _ in film.plan[1:]]
+        stumm_gesamt = arbeit / "gesamt.mp4"
 
+        mit_ki = False
         if ki_clip and Path(ki_clip).exists():
-            nach_enthuellung = film.plan[2][1]
-            vorne, hinten = arbeit / "vorne.mp4", arbeit / "hinten.mp4"
-            _bilder_an_ffmpeg(film, vorne, 0.0, nach_enthuellung, abbruch, melden, 0.0, 0.35)
-            ki = arbeit / "ki.mp4"
-            media._normalisieren(Path(ki_clip), ki, breite=BREITE, hoehe=HOEHE,
-                                 bildrate=BILDRATE, abbruch=abbruch)
-            _bilder_an_ffmpeg(film, hinten, nach_enthuellung, film.dauer, abbruch, melden,
-                              0.4, 0.85)
-            teile = [vorne, ki, hinten]
-            ki_dauer = media.angaben(ki).dauer
-            schnitte = [s if s < nach_enthuellung else s + ki_dauer for s in schnitte]
-            schnitte.insert(2, nach_enthuellung + ki_dauer)
-        else:
+            try:
+                schnitte = _mit_ki_szene(film, Path(ki_clip), arbeit, stumm_gesamt,
+                                         schnitte, abbruch, melden)
+                mit_ki = True
+            except errors.AbbruchFehler:
+                raise
+            except errors.StudioFehler as fehler:
+                # Die KI-Szene ist Beiwerk und womöglich schon bezahlt — aber ein Film
+                # ohne sie ist besser als gar keiner.
+                logbook.warnung(QUELLE, f"Die KI-Szene ließ sich nicht einfügen "
+                                        f"({fehler.meldung}) — das Video entsteht ohne sie.")
+                schnitte = [beginn for _, beginn, _ in film.plan[1:]]
+        if not mit_ki:
             stumm = arbeit / "bild.mp4"
             _bilder_an_ffmpeg(film, stumm, 0.0, film.dauer, abbruch, melden, 0.0, 0.85)
-            teile = [stumm]
-
-        stumm_gesamt = arbeit / "gesamt.mp4"
-        if len(teile) == 1:
-            teile[0].replace(stumm_gesamt)
-        else:
-            eingaben: list[str] = []
-            for teil in teile:
-                eingaben += ["-i", str(teil)]
-            kette = "".join(f"[{i}:v]" for i in range(len(teile)))
-            media._ffmpeg([*eingaben, "-filter_complex",
-                           f"{kette}concat=n={len(teile)}:v=1:a=0[v]", "-map", "[v]",
-                           "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-                           "-pix_fmt", "yuv420p", str(stumm_gesamt)],
-                          beschreibung="Szenen verbinden", abbruch=abbruch)
+            stumm.replace(stumm_gesamt)
         gesamt = media.angaben(stumm_gesamt).dauer or film.dauer
 
         if musik:

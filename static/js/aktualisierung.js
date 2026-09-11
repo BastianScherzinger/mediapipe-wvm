@@ -123,6 +123,14 @@
 
     try {
       const antwort = await MPW.hole("/api/aktualisierung", { method: "POST" });
+      if (antwort.ergebnis?.neustart === false) {
+        // Während der Installation hat ein Auftrag begonnen — der Neustart kommt, sobald
+        // er fertig ist. Bis dahin arbeitet das Programm normal weiter.
+        MPW.melden(antwort.ergebnis.meldung, "erfolg", 12000);
+        laeuftGerade = false;
+        await pruefen(true);
+        return;
+      }
       MPW.melden(antwort.ergebnis?.meldung || "Aktualisiert. Das Programm startet neu …",
                  "erfolg", 30000);
       aufNeustartWarten();

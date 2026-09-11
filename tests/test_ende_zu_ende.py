@@ -509,6 +509,26 @@ def test_wiederholen_bezahlt_nichts_doppelt(studio, monkeypatch):
 
 
 @pytest.mark.langsam
+@pytest.mark.parametrize("herkunft, uebernommen", [("demo", False), ("platform", True),
+                                                   ("", False)])
+def test_nur_echte_clips_werden_uebernommen(studio, tmp_path, herkunft, uebernommen):
+    """Ein Platzhalter aus dem Probelauf darf nie in einen echten Film geraten — und ein
+    Clip, von dem niemand weiß, woher er stammt, auch nicht. Ein echter wird übernommen."""
+    ordner = tmp_path / "video"
+    ordner.mkdir()
+    media.platzhalter_clip(ordner / "szene_01.mp4", sekunden=1, breite=640, hoehe=360)
+    if herkunft:
+        pipeline._zwischenstand_merken(ordner, 1, clip_weg=herkunft)
+    e = pipeline.einstellungen_pruefen({"briefing": "Test Herkunft", "szenen": 1,
+                                        "sekunden": 5})
+    szene = promptsmith.Szene(1, "Szene", "bild prompt", "video prompt", 5)
+
+    pipeline._eine_szene("test", e, szene, 1, 1, ordner, studio, True, {},
+                         threading.Event())
+    assert (studio.videos == 0) is uebernommen
+
+
+@pytest.mark.langsam
 def test_modell_nur_im_abo_bricht_vor_dem_ersten_bild_ab(studio):
     """Kling 3.0 gibt es nur über das Abo. Läuft die Platform-API, muss das auffallen,
     bevor ein Startbild bezahlt ist — nicht danach."""

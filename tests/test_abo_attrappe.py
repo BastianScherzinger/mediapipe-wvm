@@ -363,6 +363,78 @@ def test_bezahlter_auftrag_wird_abgeholt_statt_neu_bestellt(abo):
     assert len(dienst.angenommen) == vorher, "nichts darf doppelt bestellt werden"
 
 
+def test_verlorene_antwort_wird_nie_nachbestellt(abo, monkeypatch):
+    """Die Gegenprüfung vom 11.09.2026, schwerster Befund: Der Dienst nimmt den
+    Videoauftrag an und rechnet ab, aber die Antwort geht verloren (Zeitlimit, Gateway).
+    Früher folgten bis zu drei weitere Bestellungen — jede womöglich bezahlt.
+
+    Nachgestellt ist genau das: Die Anfrage erreicht die Attrappe (und wird dort
+    angenommen), erst danach reißt die Leitung.
+    """
+    import httpx
+
+    dienst = abo(mit_schema=True)
+    monkeypatch.setattr(higgsfield_mcp.config, "MAX_RETRIES", 3)
+    kunde = higgsfield_mcp.HiggsfieldAbo()
+    bild = kunde.bild("Motiv")
+
+    echter = higgsfield_mcp._klient()
+
+    class VerloreneAntwort:
+        is_closed = False
+
+        def post(self, adresse, **benannt):
+            antwort = echter.post(adresse, **benannt)
+            anfrage = benannt.get("json") or {}
+            if (anfrage.get("method") == "tools/call"
+                    and anfrage["params"]["name"] == "generate_video"):
+                raise httpx.ReadTimeout("Antwort unterwegs verloren")
+            return antwort
+
+    monkeypatch.setattr(higgsfield_mcp, "_klient", lambda: VerloreneAntwort())
+    with pytest.raises(errors.UnklarFehler):
+        kunde.video_aus_bild("Bewegung", bild.url, dauer=5, modell="kling2_6")
+
+    videos = [n for n, _ in dienst.aufrufe if n == "generate_video"]
+    assert len(videos) == 1, "nach verlorener Antwort darf nichts nachbestellt werden"
+    assert sum(1 for k in dienst.angenommen if k.startswith("video")) == 1
+
+
+def test_moderation_ist_kein_formfehler(abo, monkeypatch):
+    """Lehnt der Dienst den Inhalt ab, hilft keine andere Form — und kein anderes Modell."""
+    dienst = abo(mit_schema=True)
+    monkeypatch.setattr(dienst, "rufen", lambda name, argumente: (
+        dienst.aufrufe.append((name, argumente)) or
+        Dienst._fehler("Request blocked by content policy (nsfw)")))
+    with pytest.raises(errors.InhaltFehler):
+        higgsfield_mcp.HiggsfieldAbo().video_aus_text("Bewegung", dauer=5, modell="kling2_6")
+    assert len([n for n, _ in dienst.aufrufe if n == "generate_video"]) == 1
+
+
+def test_verweise_mit_listenindex_werden_aufgeloest():
+    """zod-to-json-schema verweist gern auf `#/properties/params/anyOf/0/...`."""
+    schema = {"type": "object", "properties": {"params": {"anyOf": [
+        {"type": "object", "properties": {
+            "model": {"const": "kling2_6"},
+            "duration": {"type": "integer", "enum": [5, 10]}}},
+        {"type": "object", "properties": {
+            "model": {"const": "kling3_0"},
+            "duration": {"$ref": "#/properties/params/anyOf/0/properties/duration"}}},
+    ]}}}
+    form = higgsfield_mcp._form_aus_schema(schema, "kling3_0")
+    assert form.werte["duration"] == [5, 10]
+
+
+def test_nummer_wird_auch_verschachtelt_gefunden():
+    nummer = higgsfield_mcp._auftragsnummer
+    assert nummer({"job": {"id": "j-1"}}) == "j-1"
+    assert nummer({"data": {"results": [{"id": "d-2"}]}}) == "d-2"
+    assert nummer({"results": ["r-3"]}) == "r-3"
+    assert nummer({"text": "Job 123e4567-e89b-12d3-a456-426614174000 created"}) == \
+        "123e4567-e89b-12d3-a456-426614174000"
+    assert nummer({"error": "kaputt"}) == ""
+
+
 def test_werkzeugschema_wird_gelesen(abo):
     abo(mit_schema=True)
     form = higgsfield_mcp.parameterform("generate_video", "kling3_0")

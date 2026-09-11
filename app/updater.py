@@ -37,6 +37,19 @@ _stand: dict = {}
 _stand_zeit: float = 0.0
 _sperre = threading.Lock()
 
+#: Läuft gerade ein Update? Solange nimmt die Ablaufsteuerung keine Aufträge an.
+_update_laeuft = threading.Event()
+#: Ist ein Update geholt, aber der Neustart aufgeschoben, weil ein Auftrag lief?
+_neustart_offen = {"ja": False}
+
+
+def laeuft() -> bool:
+    return _update_laeuft.is_set()
+
+
+def neustart_ausstehend() -> bool:
+    return bool(_neustart_offen["ja"])
+
 
 def _git(*argumente: str, zeitlimit: int = _ZEITLIMIT) -> tuple[int, str]:
     """Führt einen Git-Befehl im Projektordner aus. Gibt (Rückgabewert, Ausgabe)."""
@@ -176,6 +189,16 @@ def aktualisieren(neustart: bool = True) -> dict:
         raise errors.KonfigurationsFehler(
             "Die Aktualisierung wurde nicht durchgeführt.", grund, ursprung=QUELLE)
 
+    _update_laeuft.set()
+    try:
+        return _aktualisieren(neustart)
+    finally:
+        _update_laeuft.clear()
+
+
+def _aktualisieren(neustart: bool) -> dict:
+    from . import pipeline
+
     logbook.info(QUELLE, "Neuer Stand wird geholt …")
     # Ausschließlich vorspulen: nie zusammenführen, nie etwas überschreiben.
     code, ausgabe = _git("pull", "--ff-only", "--quiet")
@@ -217,11 +240,24 @@ def aktualisieren(neustart: bool = True) -> dict:
         except Exception:
             pass
 
-    if neustart:
-        logbook.info(QUELLE, "Das Programm startet in wenigen Sekunden neu.")
-        neu_starten()
+    if not neustart:
+        return {"ok": True, "version": stand["version"], "neustart": False,
+                "meldung": f"Aktualisiert auf {stand['version']}."}
 
-    return {"ok": True, "version": stand["version"],
+    # Noch einmal nachsehen: Paketinstallation kann Minuten dauern. Hat in der Zeit doch
+    # ein Auftrag begonnen oder wartet einer, wird der Neustart aufgeschoben — die
+    # Ablaufsteuerung holt ihn nach, sobald alles fertig ist.
+    if pipeline.laeuft_gerade() or pipeline.warteschlange():
+        _neustart_offen["ja"] = True
+        logbook.warnung(QUELLE, "Update geholt. Der Neustart folgt, sobald der laufende "
+                                "Auftrag fertig ist.")
+        return {"ok": True, "version": stand["version"], "neustart": False,
+                "meldung": f"Aktualisiert auf {stand['version']}. Der Neustart folgt, "
+                           "sobald der laufende Auftrag fertig ist."}
+
+    logbook.info(QUELLE, "Das Programm startet in wenigen Sekunden neu.")
+    neu_starten()
+    return {"ok": True, "version": stand["version"], "neustart": True,
             "meldung": f"Aktualisiert auf {stand['version']}. Das Programm startet neu."}
 
 

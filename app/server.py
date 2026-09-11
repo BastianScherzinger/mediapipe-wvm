@@ -16,6 +16,7 @@ from __future__ import annotations
 import mimetypes
 import re
 import time
+import urllib.parse
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory
@@ -63,6 +64,33 @@ def anwendung_bauen() -> Flask:
         uebersetzt = errors.aus_ausnahme(fehler, ursprung=QUELLE)
         logbook.fehler(QUELLE, f"{request.path}: {uebersetzt.meldung}")
         return schlecht(uebersetzt, 500)
+
+    @app.before_request
+    def herkunft_pruefen():
+        """Nur die eigene Oberfläche darf etwas auslösen.
+
+        Der Server hört zwar nur auf 127.0.0.1, aber jede Webseite im Browser des Kunden
+        könnte ihm eine einfache POST-Anfrage schicken — etwa „Update“, „Neustart“ oder
+        „Erneut versuchen“, das Guthaben kostet. Browser senden bei solchen Anfragen
+        immer eine `Origin`; stimmt sie nicht, wird abgewiesen. Die Prüfung des `Host`
+        schützt zusätzlich gegen DNS-Rebinding.
+        """
+        host = (request.host or "").rsplit(":", 1)[0].strip("[]").lower()
+        if host not in ("127.0.0.1", "localhost"):
+            return schlecht(errors.EingabeFehler("Anfrage abgewiesen.", ursprung=QUELLE), 403)
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        herkunft = request.headers.get("Origin")
+        if herkunft is None:
+            return None                      # kein Browser — z. B. die Testsuite
+        teile = urllib.parse.urlsplit(herkunft)
+        eigener_port = request.host.rsplit(":", 1)[1] if ":" in request.host else ""
+        if ((teile.hostname or "") not in ("127.0.0.1", "localhost")
+                or str(teile.port or "") != eigener_port):
+            logbook.warnung(QUELLE, f"Fremde Anfrage abgewiesen: {request.path} "
+                                    f"von {herkunft[:80]}")
+            return schlecht(errors.EingabeFehler("Anfrage abgewiesen.", ursprung=QUELLE), 403)
+        return None
 
     @app.after_request
     def kopfzeilen(antwort: Response):
@@ -246,6 +274,9 @@ def anwendung_bauen() -> Flask:
         eingereiht; die Antwort sagt, ob der Auftrag läuft oder ansteht.
         """
         daten = request.get_json(silent=True) or {}
+        # Wiederholen geht nur über die eigene Route — sie prüft, ob der alte Auftrag
+        # wirklich gescheitert und nicht schon wiederholt ist.
+        daten.pop("wiederholung_von", None)
         auftrag, sofort = pipeline.einreihen(daten)
         return gut({"auftrag": auftrag.als_dict(), "gestartet": sofort,
                     "warteschlange": pipeline.warteschlange()}, 202)
@@ -416,7 +447,8 @@ def anwendung_bauen() -> Flask:
         dadurch, dass sie gleich die Verbindung verliert, und wartet auf den neuen Server.
         """
         ergebnis = updater.aktualisieren(neustart=True)
-        logbook.ereignis("neustart", {"grund": "Aktualisierung"})
+        if ergebnis.get("neustart", True):
+            logbook.ereignis("neustart", {"grund": "Aktualisierung"})
         return gut({"ergebnis": ergebnis})
 
     @app.post("/api/neustart")

@@ -495,7 +495,6 @@
   function knoepfeVerdrahten() {
     $("#btn-start").addEventListener("click", () => MPW.start.auftragStarten());
     $("#btn-abbruch").addEventListener("click", () => MPW.start.auftragAbbrechen());
-    $("#btn-wiederholen").addEventListener("click", () => MPW.start.auftragWiederholen());
   }
 
   /** Während ein Auftrag läuft, bleibt das Formular bedienbar: Ein weiterer Auftrag

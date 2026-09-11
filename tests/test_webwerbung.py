@@ -170,6 +170,24 @@ def test_werbeschnitt_ergibt_ein_tiktok_video(tmp_path):
     assert anteile and max(anteile) == 1.0
 
 
+@pytest.mark.langsam
+@pytest.mark.skipif(not HAT_FFMPEG, reason="kein ffmpeg")
+def test_ki_szene_wird_eingefuegt(tmp_path):
+    """Die Gegenprüfung vermutete: Rohbilder ohne Pixelseitenverhältnis und die KI-Szene
+    mit `setsar=1` passen im concat-Filter nicht zusammen — und der bezahlte Clip kippt
+    den ganzen Auftrag. Hier wird genau dieser Weg gerendert."""
+    aufnahme = _falsche_aufnahme(tmp_path / "aufnahme")
+    ki = media.platzhalter_clip(tmp_path / "ki.mp4", sekunden=2, breite=720, hoehe=1280)
+    konzept = werbeschnitt.Konzept(marke="Test", hook="Ein Test mit KI?",
+                                   vorteile=["Eins", "Zwei", "Drei"], cta="Los",
+                                   host="test.de")
+    ziel = tmp_path / "film.mp4"
+    werbeschnitt.rendern(aufnahme, konzept, ziel, dauer=15, ki_clip=ki)
+    angaben = media.pruefe_video(ziel)
+    assert (angaben.breite, angaben.hoehe) == (1080, 1920)
+    assert angaben.dauer > 15.5, "die KI-Szene muss im Film sein"
+
+
 def test_text_wird_nicht_abgeschnitten():
     """„Python.org“ stand im ersten Entwurf als „Pvthon.ora“ im Bild — die Unterlängen
     fehlten. Das Wortbild muss so hoch sein wie Ober- und Unterlänge zusammen."""

@@ -120,10 +120,42 @@ def test_serverfehler_wird_wiederholt(klient, monkeypatch):
 
 
 def test_wiederholung_gibt_irgendwann_auf(klient, monkeypatch):
-    monkeypatch.setattr(klient, "_anfrage", Antworten((500, {}, "kaputt")))
+    """503 heißt „nicht angenommen“ — wiederholen, aber nicht endlos."""
+    monkeypatch.setattr(klient, "_anfrage", Antworten((503, {}, "kaputt")))
     monkeypatch.setattr("time.sleep", lambda _s: None)
     with pytest.raises(errors.NetzFehler):
         klient.auftrag_erstellen("modell/x", {"prompt": "hallo"})
+
+
+@pytest.mark.parametrize("antwort", [
+    (500, {}, "kaputt"), (502, {}, "bad gateway"), (504, {}, "gateway timeout"),
+    errors.ZeitFehler("zu spät", details={"gesendet": True}),
+    errors.NetzFehler("Leitung weg", details={"gesendet": True}),
+])
+def test_unklare_bestellung_wird_nie_wiederholt(klient, monkeypatch, antwort):
+    """Die Gegenprüfung vom 11.09.2026: Kam die Antwort auf eine Bestellung zu spät oder
+    als Gateway-Fehler, wurde bis zu dreimal neu bestellt — womöglich jedes Mal bezahlt.
+    Jetzt genau ein Versuch und ein Fehler, der den Lauf beendet."""
+    from app import pipeline
+
+    antworten = Antworten(antwort)
+    monkeypatch.setattr(klient, "_anfrage", antworten)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    with pytest.raises(errors.UnklarFehler) as info:
+        klient.auftrag_erstellen("modell/x", {"prompt": "hallo"})
+    assert len(antworten.aufrufe) == 1
+    assert not info.value.wiederholbar
+    assert isinstance(info.value, pipeline._TOEDLICH)
+
+
+def test_verbindung_nicht_aufgebaut_wird_wiederholt(klient, monkeypatch):
+    """Kam keine Verbindung zustande, ist nichts bestellt — dann darf wiederholt werden."""
+    antworten = Antworten(errors.NetzFehler("keine Verbindung"),
+                          (200, {"request_id": "ok-2"}, ""))
+    monkeypatch.setattr(klient, "_anfrage", antworten)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    kennung, _ = klient.auftrag_erstellen("modell/x", {"prompt": "hallo"})
+    assert kennung == "ok-2"
 
 
 def test_fehlende_kennung_ist_ein_anbieterfehler(klient, monkeypatch):

@@ -11,6 +11,7 @@
   const { $ } = MPW;
 
   let laufenderAuftrag = "";
+  let laufendeArt = "";               // „video“ oder „webseite“
   let wiederholbar = "";              // Kennung des letzten gescheiterten Auftrags
   let reihe = [];
   let startdaten = null;
@@ -48,6 +49,9 @@
     wegzeileSetzen(start.videoweg, start.videoweg_name);
     $("#btn-selbsttest").addEventListener("click", selbsttest);
     for (const lampe of MPW.$$(".lampe")) lampe.addEventListener("click", selbsttest);
+    for (const knopf of MPW.$$("[data-wiederholen]")) {
+      knopf.addEventListener("click", auftragWiederholen);
+    }
 
     MPW.stromVerbinden();
     MPW.beiEreignis("auftrag", auftragsereignis);
@@ -91,20 +95,22 @@
       laeuftSetzen(Boolean(laufenderAuftrag));
 
       if (laufenderAuftrag && antwort.auftrag) {
+        laufendeArt = antwort.auftrag.einstellungen?.art || "video";
         MPW.ablauf.fuerAuftrag(antwort.auftrag);
         zeile("Ein Auftrag läuft: " + (antwort.auftrag.titel || "").slice(0, 60));
         MPW.ablauf.notiz("Läuft …");
         wiederholenAnbieten("");
       } else {
         const letzter = (antwort.letzte || [])[0];
+        const schonWiederholt = Boolean(letzter?.fehler?.wiederholt);
         if (letzter && letzter.zustand === "fehler") {
           const f = letzter.fehler || {};
           zeile((f.meldung || "Der letzte Auftrag ist fehlgeschlagen.") +
                 (f.hinweis ? " " + f.hinweis : ""), "fehler");
-          wiederholenAnbieten(letzter.id);
+          wiederholenAnbieten(schonWiederholt ? "" : letzter.id);
         } else if (letzter && letzter.zustand === "abgebrochen" && letzter.ordner) {
           zeile("Der letzte Auftrag wurde abgebrochen.");
-          wiederholenAnbieten(letzter.id);
+          wiederholenAnbieten(schonWiederholt ? "" : letzter.id);
         } else if (letzter && letzter.zustand === "fertig") {
           zeile("Bereit. Zuletzt: " + (letzter.titel || "").slice(0, 50), "erfolg");
           wiederholenAnbieten("");
@@ -126,7 +132,7 @@
 
   function wiederholenAnbieten(kennung) {
     wiederholbar = kennung || "";
-    $("#btn-wiederholen").hidden = !wiederholbar;
+    for (const knopf of MPW.$$("[data-wiederholen]")) knopf.hidden = !wiederholbar;
   }
 
   /* ── Auftrag starten ───────────────────────────────────────────────────── */
@@ -166,6 +172,7 @@
     wiederholenAnbieten("");
     if (antwort.gestartet) {
       laufenderAuftrag = antwort.auftrag.id;
+      laufendeArt = antwort.auftrag.einstellungen?.art || "video";
       MPW.ablauf.fuerAuftrag(antwort.auftrag);
       laeuftSetzen(true);
       melde("Läuft. Sie können das Fenster offen lassen.");
@@ -182,8 +189,8 @@
    *  übernommen. */
   async function auftragWiederholen() {
     if (!wiederholbar) return;
-    const knopf = $("#btn-wiederholen");
-    knopf.disabled = true;
+    const knoepfe = MPW.$$("[data-wiederholen]");
+    for (const knopf of knoepfe) knopf.disabled = true;
     zeile("Der Auftrag wird wiederholt — Fertiges wird übernommen …");
     try {
       if (!laufenderAuftrag) MPW.ablauf.zuruecksetzen();
@@ -194,7 +201,7 @@
       zeile(fehler.meldung || fehler.message, "fehler");
       MPW.melden(fehler.message, "fehler", 9000);
     } finally {
-      knopf.disabled = false;
+      for (const knopf of knoepfe) knopf.disabled = false;
     }
   }
 
@@ -259,6 +266,7 @@
   function auftragsereignis(nachricht) {
     if (nachricht.aktion === "gestartet") {
       laufenderAuftrag = nachricht.auftrag?.id || laufenderAuftrag;
+      laufendeArt = nachricht.auftrag?.einstellungen?.art || "video";
       // Kein Neustart, solange Guthaben in Arbeit ist.
       laeuftSetzen(true);
       wiederholenAnbieten("");
@@ -271,7 +279,8 @@
       // nachfragen, statt den Zustand zu erraten.
       window.setTimeout(zustandAbgleichen, 900);
     }
-    const istWebseite = nachricht.ergebnis?.art === "webseite";
+    const istWebseite = nachricht.ergebnis?.art === "webseite" || laufendeArt === "webseite";
+    if (["fertig", "fehler", "abgebrochen"].includes(nachricht.aktion)) laufendeArt = "";
     if (nachricht.aktion === "fertig") {
       const titel = nachricht.ergebnis?.titel || "Video";
       zeile("Fertig: " + titel, "erfolg");
@@ -281,7 +290,7 @@
       const meldung = nachricht.fehler?.meldung || "Fehlgeschlagen.";
       const hinweis = nachricht.fehler?.hinweis || "";
       zeile(meldung + (hinweis ? " " + hinweis : ""), "fehler");
-      MPW.webseite.zeile(meldung, "fehler");
+      if (istWebseite) MPW.webseite.zeile(meldung + (hinweis ? " " + hinweis : ""), "fehler");
       MPW.melden(meldung, "fehler", 11000);
     } else if (nachricht.aktion === "abgebrochen") {
       zeile("Abgebrochen.");

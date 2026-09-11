@@ -496,25 +496,71 @@ def _fehlertext(antwort) -> str:
 
 
 def _unbekanntes_modell(antwort) -> bool:
-    """Sagt der Dienst „unknown model“? Dann hilft nur ein anderer Modellname."""
+    """Sagt der Dienst „unknown model“? Dann hilft nur ein anderer Modellname.
+
+    Bewusst eng: Früher genügten „model“ und „available“ irgendwo im Text — dann galt
+    auch „aspect_ratio 3:4 is not available for this model“ als unbekanntes Modell, und
+    der Auftrag wechselte ungefragt auf ein anderes.
+    """
     text = _fehlertext(antwort).lower()
-    return "unknown model" in text or "model not found" in text or            ("model" in text and "available" in text)
+    return any(w in text for w in ("unknown model", "model not found", "invalid model",
+                                   "unsupported model", "no such model",
+                                   "model does not exist", "model is not supported"))
+
+
+def _inhaltsfehler(antwort) -> bool:
+    """Lehnt der Dienst den Inhalt ab (Moderation)? Eine andere Form hilft da nicht."""
+    text = _fehlertext(antwort).lower()
+    return any(w in text for w in ("nsfw", "moderation", "content policy", "inappropriate",
+                                   "ip_detected", "prohibited content", "safety system",
+                                   "violates"))
+
+
+def _tariffehler(antwort) -> bool:
+    """Fehlt dem Abo die Berechtigung (Tarif, Freischaltung)? Das trifft jede Szene."""
+    text = _fehlertext(antwort).lower()
+    return any(w in text for w in ("subscription", "upgrade your plan", "not available on "
+                                   "your plan", "plan does not", "requires a paid",
+                                   "permission denied", "not authorized", "forbidden"))
+
+
+_UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+                   re.IGNORECASE)
 
 
 def _auftragsnummer(antwort) -> str:
-    """Die Auftragsnummer aus einer Werkzeugantwort, egal wo sie steckt."""
+    """Die Auftragsnummer aus einer Werkzeugantwort, egal wo sie steckt.
+
+    Erkannt werden: `results`/`jobs` als Liste von Objekten oder Kennungen, ein
+    verschachteltes `job`/`data`/`result`/`generation`, die Kennung auf oberster Ebene —
+    und zur Not eine UUID im Klartext der Antwort. Eine übersehene Nummer hieße: Der
+    Auftrag läuft und ist bezahlt, aber niemand holt ihn ab.
+    """
     if not isinstance(antwort, dict):
         return ""
-    treffer = antwort.get("results") or antwort.get("jobs") or []
-    if isinstance(treffer, list) and treffer and isinstance(treffer[0], dict):
-        for feld in ("id", "jobId", "job_id", "request_id"):
-            wert = treffer[0].get(feld)
-            if wert:
-                return str(wert)
-    for feld in ("id", "jobId", "job_id", "request_id"):
-        wert = antwort.get(feld)
-        if wert:
-            return str(wert)
+    felder = ("id", "jobId", "job_id", "request_id", "generation_id")
+    for liste in (antwort.get("results"), antwort.get("jobs")):
+        if isinstance(liste, list) and liste:
+            erstes = liste[0]
+            if isinstance(erstes, dict):
+                for feld in felder:
+                    if erstes.get(feld):
+                        return str(erstes[feld])
+            elif isinstance(erstes, str) and erstes.strip():
+                return erstes.strip()
+    for feld in felder:
+        if antwort.get(feld) and not isinstance(antwort[feld], (dict, list)):
+            return str(antwort[feld])
+    for behaelter in ("job", "data", "result", "generation"):
+        tiefer = antwort.get(behaelter)
+        if isinstance(tiefer, dict):
+            gefunden = _auftragsnummer(tiefer)
+            if gefunden:
+                return gefunden
+    if isinstance(antwort.get("text"), str) and not antwort.get("error"):
+        treffer = _UUID.search(antwort["text"])
+        if treffer:
+            return treffer.group(0)
     return ""
 
 
@@ -626,11 +672,6 @@ def _rpc(methode: str, parameter: dict, zeitlimit: int = 60) -> dict:
         except Exception:
             pass
 
-        kennung = secrets.randbelow(1_000_000) + 2
-        antwort = klient.post(_MCP_URL, headers=_kopfzeilen(token, sitzung),
-                              timeout=zeitlimit, json={
-            "jsonrpc": "2.0", "id": kennung, "method": methode,
-            "params": parameter})
     except httpx.TimeoutException as fehler:
         raise errors.ZeitFehler("Higgsfield hat nicht rechtzeitig geantwortet.",
                                 "Das Programm versucht es erneut.",
@@ -639,12 +680,48 @@ def _rpc(methode: str, parameter: dict, zeitlimit: int = 60) -> dict:
         raise errors.NetzFehler("Keine Verbindung zu Higgsfield.",
                                 "Internetverbindung prüfen.", ursprung=QUELLE) from fehler
 
+    # Der eigentliche Aufruf. Bei einem bestellenden Werkzeug ist ein Fehler **nach**
+    # dem Absenden kein Netzproblem, sondern eine offene Frage: Der Auftrag kann längst
+    # angenommen und bezahlt sein. Dann wird nicht wiederholt (`UnklarFehler`). Nur ein
+    # Fehler beim Verbindungsaufbau beweist, dass nichts angekommen ist.
+    bestellend = (methode == "tools/call" and
+                  str(parameter.get("name", "")).startswith(("generate_", "create_")))
+    kennung = secrets.randbelow(1_000_000) + 2
+    try:
+        antwort = klient.post(_MCP_URL, headers=_kopfzeilen(token, sitzung),
+                              timeout=zeitlimit, json={
+            "jsonrpc": "2.0", "id": kennung, "method": methode,
+            "params": parameter})
+    except (httpx.ConnectError, httpx.ConnectTimeout) as fehler:
+        raise errors.NetzFehler("Keine Verbindung zu Higgsfield.",
+                                "Internetverbindung prüfen.", ursprung=QUELLE) from fehler
+    except httpx.HTTPError as fehler:
+        if bestellend:
+            raise _unklar(type(fehler).__name__) from fehler
+        if isinstance(fehler, httpx.TimeoutException):
+            raise errors.ZeitFehler("Higgsfield hat nicht rechtzeitig geantwortet.",
+                                    "Das Programm versucht es erneut.",
+                                    ursprung=QUELLE) from fehler
+        raise errors.NetzFehler("Keine Verbindung zu Higgsfield.",
+                                "Internetverbindung prüfen.", ursprung=QUELLE) from fehler
+
     if antwort.status_code == 401:
         raise errors.ZugangFehler("Die Anmeldung ist abgelaufen.",
                                   "Bitte im Dashboard erneut anmelden.", ursprung=QUELLE)
+    if bestellend and antwort.status_code >= 500 and antwort.status_code != 503:
+        raise _unklar(f"Code {antwort.status_code}")
     if antwort.status_code >= 400:
         raise errors.aus_httpfehler(antwort.status_code, antwort.text, ursprung=QUELLE)
     return _ergebnis(_zerlegen(antwort), kennung)
+
+
+def _unklar(grund: str) -> errors.UnklarFehler:
+    return errors.UnklarFehler(
+        "Higgsfield hat auf den Auftrag nicht geantwortet — ob er angenommen wurde, "
+        "ist unklar.",
+        "Es wird nicht automatisch neu bestellt, damit nichts doppelt bezahlt wird. Bitte "
+        "unter higgsfield.ai bei den letzten Erzeugungen nachsehen und dann „Erneut "
+        f"versuchen“ klicken. (Technischer Grund: {grund})", ursprung=QUELLE)
 
 
 # ── Welche Modelle kennt der Dienst? ─────────────────────────────────────────
@@ -745,7 +822,7 @@ def _passt_zur_art(eintrag: dict, art: str) -> bool:
 
 def _aehnlichkeit(kandidat: str, wunsch: list[str]) -> int:
     """Wie viele Wortteile des Wunsches stecken im Kandidaten? Grob, aber genau
-    grob genug, um „kling-video/v2.6/pro“ auf „kling2_6_pro“ zu bringen."""
+    grob genug, um „kling-video/v2.6/pro“ auf „kling2_6“ zu bringen."""
     text = "".join(_teile(kandidat))
     return sum(1 for teil in wunsch if teil and teil in text)
 
@@ -986,12 +1063,25 @@ def _importwerkzeuge() -> list[str]:
 # `medias` ablesen lassen.
 
 def _verweis(schema, wurzel: dict):
-    """Löst `{"$ref": "#/definitions/X"}` auf. Unbekanntes bleibt, wie es ist."""
+    """Löst `{"$ref": "#/definitions/X"}` auf — auch Verweise mit Listenindex
+    (`#/properties/params/anyOf/0/…`, so erzeugt zod-to-json-schema sie) und die
+    Maskierungen `~0`/`~1`. Unbekanntes bleibt, wie es ist."""
     tiefe = 0
     while isinstance(schema, dict) and isinstance(schema.get("$ref"), str) and tiefe < 20:
         ziel = wurzel
-        for teil in schema["$ref"].lstrip("#/").split("/"):
-            ziel = ziel.get(teil) if isinstance(ziel, dict) else None
+        pfad = schema["$ref"]
+        if not pfad.startswith("#"):
+            return schema
+        for teil in pfad.lstrip("#").strip("/").split("/"):
+            if not teil:
+                continue
+            teil = urllib.parse.unquote(teil).replace("~1", "/").replace("~0", "~")
+            if isinstance(ziel, dict):
+                ziel = ziel.get(teil)
+            elif isinstance(ziel, list) and teil.isdigit() and int(teil) < len(ziel):
+                ziel = ziel[int(teil)]
+            else:
+                ziel = None
         if not isinstance(ziel, dict):
             return schema
         schema = ziel
@@ -1570,10 +1660,32 @@ class HiggsfieldAbo:
                         "Das Higgsfield-Abo hat keine Credits mehr.",
                         "Unter higgsfield.ai das Guthaben prüfen. Solange erzeugt der "
                         "Probelauf Platzhalterclips.", ursprung=QUELLE)
+                if _inhaltsfehler(antwort):
+                    raise errors.InhaltFehler(
+                        "Higgsfield hat den Inhalt abgelehnt (Moderation).",
+                        f"Der Dienst meldet: {grund[:200]}. Marken, echte Personen und "
+                        "Gewalt vermeiden.", ursprung=QUELLE)
+                if _tariffehler(antwort):
+                    raise errors.ZugangFehler(
+                        "Das Higgsfield-Abo erlaubt diesen Auftrag nicht.",
+                        f"Der Dienst meldet: {grund[:200]}. Unter higgsfield.ai den Tarif "
+                        "prüfen oder ein anderes Modell wählen.", ursprung=QUELLE)
                 if _unbekanntes_modell(antwort):
                     unbekannt = True
                     modellwechsel = True
                     break
+                if not grund.strip() or grund.strip() in ("{}", "None"):
+                    # Kein Fehlertext und keine erkennbare Nummer: Der Auftrag kann
+                    # angenommen sein, ohne dass wir ihn verfolgen können. Weitere Szenen
+                    # würden genauso ins Leere laufen — also den ganzen Lauf beenden.
+                    logbook.warnung(QUELLE, "Antwort ohne erkennbare Auftragsnummer: " +
+                                    config.entschaerfe(json.dumps(antwort,
+                                                                  ensure_ascii=False))[:800])
+                    raise errors.UnklarFehler(
+                        "Higgsfield hat geantwortet, aber keine Auftragsnummer genannt.",
+                        "Ob der Auftrag angenommen wurde, ist unklar — es wird nichts "
+                        "nachbestellt. Die Antwort steht im Logbuch; bitte oben auf "
+                        "„Update“ klicken.", ursprung=QUELLE)
                 if not _eingabefehler(antwort):
                     nur_formfehler = False
                     raise errors.AnbieterFehler(
@@ -1669,9 +1781,15 @@ class HiggsfieldAbo:
             if not zustand:
                 grund = _fehlertext(stand)
                 if grund:
+                    # „not found“ heißt: Diesen Auftrag gibt es beim Dienst nicht (mehr).
+                    # Nur dann darf ein Wiederholungslauf neu bestellen — bei jeder anderen
+                    # Meldung kann der Auftrag noch laufen und bezahlt sein.
+                    endgueltig = any(w in grund.lower() for w in ("not found", "unknown job",
+                                                                  "does not exist"))
                     raise errors.AnbieterFehler(
                         "Higgsfield kann den Stand des Auftrags nicht mitteilen.",
-                        config.entschaerfe(grund), ursprung=QUELLE)
+                        config.entschaerfe(grund), ursprung=QUELLE,
+                        details={"endzustand": "unbekannt"} if endgueltig else {})
 
             if zustand in ("completed", "succeeded", "success", "done"):
                 adresse = (roh.get("result_url") or roh.get("min_result_url") or
@@ -1702,7 +1820,7 @@ class HiggsfieldAbo:
                 raise errors.AnbieterFehler(
                     "Higgsfield konnte den Auftrag nicht ausführen.",
                     config.entschaerfe(str(roh.get("error") or zustand)[:200]),
-                    ursprung=QUELLE)
+                    ursprung=QUELLE, details={"endzustand": zustand})
 
             if melden:
                 anteil = min(0.95, vergangen / erwartet)

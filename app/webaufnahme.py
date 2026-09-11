@@ -339,6 +339,15 @@ _JS_BANNER = r"""
       if (geklickt >= 2) break;
     }
   }
+  // Bekannte Banner-Wurzeln — viele liegen im Shadow-DOM und sind nur über ihren
+  // Wirt zu fassen (Usercentrics bei dm.de: #usercentrics-root).
+  for (const el of document.querySelectorAll(
+      "#usercentrics-root, #usercentrics-cmp-ui, #CybotCookiebotDialog, #onetrust-consent-sdk, " +
+      "#didomi-host, .cc-window, #cmpbox, #cmpbox2, #BorlabsCookieBox, .borlabs-cookie, " +
+      "#cookie-law-info-bar, #moove_gdpr_cookie_info_bar, .cmplz-cookiebanner, " +
+      "[id^='sp_message_container'], .sp_veil, #cookiebanner, #cookie-banner, .cookie-banner")) {
+    el.style.setProperty("display", "none", "important");
+  }
   const muster = /(cookie|consent|datenschutz|privacy|gdpr|dsgvo|usercentrics|cookiebot|onetrust|borlabs)/i;
   for (const el of document.querySelectorAll("body *")) {
     const s = getComputedStyle(el);
@@ -434,6 +443,7 @@ def _mit_playwright(aufnahme: Aufnahme, ordner: Path, abbruch, melden) -> None:
                 viewport={"width": MOBIL_BREITE, "height": MOBIL_HOEHE},
                 device_scale_factor=MOBIL_FAKTOR, is_mobile=True, has_touch=True,
                 user_agent=_UA_MOBIL, locale="de-DE")
+            handy.route("**/*", _nur_oeffentlich)
             seite = handy.new_page()
             _laden(seite, aufnahme.url)
             if melden:
@@ -460,6 +470,7 @@ def _mit_playwright(aufnahme: Aufnahme, ordner: Path, abbruch, melden) -> None:
             rechner = browser.new_context(viewport={"width": 1440, "height": 900},
                                           device_scale_factor=1, user_agent=_UA_DESKTOP,
                                           locale="de-DE")
+            rechner.route("**/*", _nur_oeffentlich)
             seite = rechner.new_page()
             _laden(seite, aufnahme.url)
             aufnahme.desktop = ordner / "aufnahme_desktop.png"
@@ -467,6 +478,36 @@ def _mit_playwright(aufnahme: Aufnahme, ordner: Path, abbruch, melden) -> None:
             rechner.close()
         finally:
             browser.close()
+
+
+def _nur_oeffentlich(route) -> None:
+    """Sperrt jede Anfrage der fotografierten Seite an diesen Rechner oder das Heimnetz.
+
+    Eine Webseite könnte per Skript `http://127.0.0.1:7788/…` laden — dann landete
+    etwa das Logbuch dieses Programms im Werbevideo. Geprüft wird ohne Namensauflösung
+    (sie kostete bei jeder der hundert Anfragen einer Seite Zeit): Namen wie
+    `localhost` und nackte private Adressen werden abgewiesen.
+    """
+    try:
+        host = (urllib.parse.urlsplit(route.request.url).hostname or "").lower()
+        privat = host in ("localhost",) or host.endswith((".local", ".localhost",
+                                                          ".internal"))
+        if not privat and host:
+            try:
+                ip = ipaddress.ip_address(host.strip("[]"))
+                privat = (ip.is_private or ip.is_loopback or ip.is_link_local or
+                          ip.is_reserved or ip.is_unspecified)
+            except ValueError:
+                pass
+        if privat:
+            route.abort()
+        else:
+            route.continue_()
+    except Exception:
+        try:
+            route.continue_()
+        except Exception:
+            pass
 
 
 def _laden(seite, url: str) -> None:
@@ -483,6 +524,7 @@ def _laden(seite, url: str) -> None:
         seite.wait_for_load_state("networkidle", timeout=10000)
     except Exception:
         pass
+    _banner_wegklicken(seite)
     for rahmen in [seite.main_frame, *seite.frames[1:6]]:
         try:
             rahmen.evaluate(_JS_BANNER)
@@ -504,6 +546,45 @@ def _laden(seite, url: str) -> None:
         seite.wait_for_timeout(250)
     except Exception:
         pass
+
+
+#: Zuerst ablehnen: Für ein Foto der Seite braucht es keine Einwilligung in Werbe- und
+#: Statistik-Cookies. Nur wo es keinen Ablehnen-Knopf gibt, wird zugestimmt.
+_ABLEHNEN = re.compile(
+    r"^\s*(alle\s+)?(ablehnen|einwilligung ablehnen|nicht zustimmen|"
+    r"nur\s+(notwendige|essenzielle|essentielle|erforderliche|technisch notwendige)"
+    r"(\s+cookies)?(\s+(akzeptieren|zulassen|erlauben))?|"
+    r"reject(\s+all)?|decline(\s+all)?|deny|only necessary|necessary only)\b", re.IGNORECASE)
+_ANNEHMEN = re.compile(
+    r"^\s*(alle[s]?\s+)?(akzeptieren|zustimmen|annehmen|einverstanden|verstanden|ok|okay|"
+    r"accept(\s+all)?(\s+cookies)?|allow all|agree|i agree|got it|"
+    r"alle cookies akzeptieren|cookies (zulassen|akzeptieren)|zulassen)\b", re.IGNORECASE)
+
+
+def _banner_wegklicken(seite) -> bool:
+    """Klickt einen Cookie-Banner weg — auch im Shadow-DOM und in Rahmen.
+
+    Die Rollen-Suche von Playwright durchdringt offenes Shadow-DOM; ein
+    `querySelectorAll` im Seitenskript tut das nicht. Genau daran blieb der Banner von
+    dm.de (Usercentrics) beim ersten Härtetest am 11.09.2026 im Bild.
+    """
+    rahmen = [seite.main_frame, *[f for f in seite.frames if f != seite.main_frame][:6]]
+    for muster in (_ABLEHNEN, _ANNEHMEN):
+        for teil in rahmen:
+            for rolle in ("button", "link"):
+                try:
+                    knopf = teil.get_by_role(rolle, name=muster)
+                    if knopf.count() == 0:
+                        continue
+                    erster = knopf.first
+                    if not erster.is_visible():
+                        continue
+                    erster.click(timeout=2500)
+                    seite.wait_for_timeout(700)
+                    return True
+                except Exception:
+                    continue
+    return False
 
 
 def browser_pfad() -> str:

@@ -75,10 +75,15 @@ def einstellungen_pruefen(roh: dict, Einstellungen):
     hinweis = " ".join(str(roh.get("hinweis") or "").split())[:300]
     formate = tuple(f for f in (roh.get("formate") or []) if f in media.FORMATE
                     and f != "hoch")
+    from . import higgsfield
+    videomodell = str(roh.get("videomodell") or config.VIDEO_MODEL)
+    if videomodell not in {m["id"] for m in higgsfield.VIDEOMODELLE}:
+        videomodell = config.VIDEO_MODEL
     return Einstellungen(
         briefing=url, art="webseite", szenen=1, sekunden=dauer,
         seitenverhaeltnis="9:16", formate=formate,
-        videomodell=str(roh.get("videomodell") or config.VIDEO_MODEL),
+        wiederholung_von=str(roh.get("wiederholung_von") or "").strip()[:32],
+        videomodell=videomodell,
         bildmodell=config.IMAGE_MODEL,
         webseite={"url": url, "dauer": dauer, "stil": stil, "cta": cta,
                   "hinweis": hinweis, "musik": roh.get("musik", True) is not False,
@@ -268,6 +273,15 @@ def _ki_szene(auftrag_id: str, e, konzept: dict, ordner: Path,
     """Eine Filmszene über Higgsfield. Scheitert sie, geht es ohne sie weiter."""
     from . import higgsfield, pipeline
 
+    ziel = ordner / "ki_szene.mp4"
+    if ziel.exists():
+        try:
+            media.pruefe_video(ziel)
+            logbook.info(QUELLE, "Die KI-Szene vom letzten Versuch wird übernommen — kostet "
+                                 "nichts.", job=auftrag_id)
+            return ziel
+        except errors.StudioFehler:
+            ziel.unlink(missing_ok=True)
     try:
         dienst = videoquelle.aktiv()
     except errors.StudioFehler:
@@ -285,23 +299,31 @@ def _ki_szene(auftrag_id: str, e, konzept: dict, ordner: Path,
     try:
         einstellung = SimpleNamespace(videomodell=e.videomodell, bildmodell=e.bildmodell,
                                       seitenverhaeltnis="9:16", sekunden=5)
-        pipeline._vorpruefen(auftrag_id, einstellung, dienst)
-        _block(auftrag_id, "schnitt", "aktiv", "KI-Szene: Startbild")
-        bild = pipeline._aufrufen(dienst.bild, prompt, seitenverhaeltnis="9:16",
-                                  modell=e.bildmodell or config.IMAGE_MODEL, abbruch=abbruch)
-        dienst.herunterladen(bild.url, ordner / "ki_szene_start.jpg", abbruch)
-        _block(auftrag_id, "schnitt", "aktiv", "KI-Szene: Bewegung")
+        pipeline._vorpruefen(auftrag_id, einstellung, dienst, block="schnitt")
 
         def melden(anteil, rest, zustand):
             _fortschritt(auftrag_id, "schnitt", 0.3 * anteil, rest, f"KI-Szene · {zustand}")
 
-        clip = pipeline._aufrufen(
-            dienst.video_aus_bild,
-            "Slow cinematic push-in, subtle natural motion, one continuous shot.",
-            bild.url, dauer=einstellung.sekunden, modell=e.videomodell,
-            seitenverhaeltnis="9:16", abbruch=abbruch, melden=melden,
-            bild_kennung=bild.request_id)
-        ziel = ordner / "ki_szene.mp4"
+        bewegung = "Slow cinematic push-in, subtle natural motion, one continuous shot."
+        if higgsfield.braucht_startbild(e.videomodell):
+            _block(auftrag_id, "schnitt", "aktiv", "KI-Szene: Startbild")
+            bild = pipeline._aufrufen(dienst.bild, prompt, seitenverhaeltnis="9:16",
+                                      modell=e.bildmodell or config.IMAGE_MODEL,
+                                      abbruch=abbruch)
+            dienst.herunterladen(bild.url, ordner / "ki_szene_start.jpg", abbruch)
+            _block(auftrag_id, "schnitt", "aktiv", "KI-Szene: Bewegung")
+            clip = pipeline._aufrufen(
+                dienst.video_aus_bild, bewegung, bild.url, dauer=einstellung.sekunden,
+                modell=e.videomodell, seitenverhaeltnis="9:16", abbruch=abbruch,
+                melden=melden, bild_kennung=bild.request_id)
+        else:
+            # Ein Modell ohne Startbild bekommt keins — sonst wäre das Bild bezahlt und
+            # der Videoauftrag scheiterte trotzdem.
+            _block(auftrag_id, "schnitt", "aktiv", "KI-Szene")
+            clip = pipeline._aufrufen(
+                dienst.video_aus_text, f"{prompt}. {bewegung}", dauer=einstellung.sekunden,
+                modell=e.videomodell, seitenverhaeltnis="9:16", abbruch=abbruch,
+                melden=melden)
         dienst.herunterladen(clip.url, ziel, abbruch)
         media.pruefe_video(ziel)
         logbook.erfolg(QUELLE, "KI-Szene ist fertig und kommt ins Video.", job=auftrag_id)
@@ -330,7 +352,13 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
     _block(auftrag_id, "pruefen", "aktiv", "Link wird geprüft")
     pruefung = webaufnahme.adresse_pruefen(url)
     titel = f"TikTok-Werbung · {pruefung['host']}"
-    ordner = jobstore.ordner_fuer(jobstore.holen(auftrag_id), _dateiname(pruefung["host"]))
+    alt = jobstore.holen(e.wiederholung_von) if e.wiederholung_von else None
+    if alt is not None and alt.ordner and Path(alt.ordner).is_dir():
+        # Beim Wiederholen derselbe Ordner: Dort liegt eine schon bezahlte KI-Szene.
+        ordner = Path(alt.ordner)
+    else:
+        ordner = jobstore.ordner_fuer(jobstore.holen(auftrag_id),
+                                      _dateiname(pruefung["host"]))
     jobstore.aktualisieren(auftrag_id, titel=titel, ordner=str(ordner))
     logbook.info(QUELLE, f"Webseite erreichbar: {pruefung['titel'][:80]} "
                          f"({pruefung['dauer_ms']} ms)", job=auftrag_id)

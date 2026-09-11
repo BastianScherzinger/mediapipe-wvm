@@ -222,7 +222,7 @@
         <div class="startzeile-reihe">
           <p class="startzeile" id="startzeile">Bereit.</p>
           <button class="knopf knopf-leise knopf-wiederholen" id="btn-wiederholen"
-                  type="button" hidden
+                  data-wiederholen type="button" hidden
                   title="Fertige Szenen, Startbilder und Drehbuch werden übernommen — bezahlt wird nur, was noch fehlt.">
             <svg class="icon" viewBox="0 0 24 24"><use href="#i-neu"/></svg>Erneut versuchen
           </button>
@@ -316,7 +316,14 @@
             <span>Abbrechen</span>
           </button>
         </div>
-        <p class="startzeile" id="web-zeile">Link eingeben und prüfen.</p>
+        <div class="startzeile-reihe">
+          <p class="startzeile" id="web-zeile">Link eingeben und prüfen.</p>
+          <button class="knopf knopf-leise knopf-wiederholen" data-wiederholen type="button"
+                  hidden
+                  title="Aufnahmen, Konzept und eine schon bezahlte KI-Szene werden übernommen.">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-neu"/></svg>Erneut versuchen
+          </button>
+        </div>
         <div class="reihe" data-reihe hidden></div>
       </div>
     </div>

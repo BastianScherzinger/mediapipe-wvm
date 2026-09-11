@@ -208,6 +208,10 @@ Briefing  →  Claude  →  Startbild  →  Higgsfield  →  Ausgabe
 Das Startbild erscheint als Vorschau, sobald es da ist. So sehen Sie den Look, bevor das
 Video fertig ist.
 
+Bei einem Werbevideo aus einer Webseite heißen die Blöcke passend dazu
+`Webseite → Aufnahmen → Konzept → Schnitt → Ausgabe`, und die Aufnahme der Seite
+erscheint als Vorschau.
+
 ### Rechts unten: Logbuch und Videos
 
 Das **Logbuch** zeigt jeden Schritt mit Uhrzeit. Bei einem Problem steht dort im
