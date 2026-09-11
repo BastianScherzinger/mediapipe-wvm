@@ -561,6 +561,35 @@ def drehbuch_erstellen(briefing: str, *, szenen: int = 1, sekunden_je_szene: int
     return drehbuch
 
 
+def drehbuch_aus_dict(daten: dict) -> Drehbuch | None:
+    """Baut ein gespeichertes Drehbuch wieder auf — für „Erneut versuchen“.
+
+    Ein zweites Mal das Sprachmodell zu fragen, kostete Zeit und ergäbe ein anderes
+    Drehbuch: Die schon bezahlten Startbilder und Clips passten dann nicht mehr dazu.
+    """
+    if not isinstance(daten, dict):
+        return None
+    szenen = []
+    for stelle, eintrag in enumerate(daten.get("szenen") or [], start=1):
+        if not isinstance(eintrag, dict) or not eintrag.get("bild_prompt"):
+            continue
+        szenen.append(Szene(nr=int(eintrag.get("nr") or stelle),
+                            beschreibung=str(eintrag.get("beschreibung") or ""),
+                            bild_prompt=str(eintrag["bild_prompt"]),
+                            video_prompt=str(eintrag.get("video_prompt") or ""),
+                            dauer=int(eintrag.get("dauer") or 5)))
+    if not szenen:
+        return None
+    return Drehbuch(titel=str(daten.get("titel") or "Video"),
+                    dateiname=str(daten.get("dateiname") or "video"),
+                    zusammenfassung=str(daten.get("zusammenfassung") or ""),
+                    stil=str(daten.get("stil") or ""), szenen=szenen,
+                    quelle=str(daten.get("quelle") or "übernommen"),
+                    notbehelf=bool(daten.get("notbehelf")),
+                    posting=str(daten.get("posting") or ""),
+                    hashtags=list(daten.get("hashtags") or []))
+
+
 def eigenen_prompt_veredeln(prompt: str, *, sekunden: int = 5, modell: str = "",
                             seitenverhaeltnis: str = "") -> Drehbuch:
     """Für den Freitext-Bereich: der eingegebene Prompt wird zu einem sauberen

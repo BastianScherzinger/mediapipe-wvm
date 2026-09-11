@@ -244,6 +244,14 @@ def anwendung_bauen() -> Flask:
                 ursprung=QUELLE)
         return gut({"abgebrochen": kennung})
 
+    @app.post("/api/auftrag/<kennung>/wiederholen")
+    def auftrag_wiederholen(kennung: str):
+        """Startet einen gescheiterten Auftrag erneut — Drehbuch, Startbilder und fertige
+        Szenen werden übernommen, bezahlt wird nur, was noch fehlt."""
+        auftrag, sofort = pipeline.wiederholen(kennung)
+        return gut({"auftrag": auftrag.als_dict(), "gestartet": sofort,
+                    "warteschlange": pipeline.warteschlange()}, 202)
+
     @app.get("/api/auftraege")
     def auftraege_liste():
         grenze = request.args.get("grenze", type=int) or 30

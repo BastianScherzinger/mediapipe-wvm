@@ -476,9 +476,31 @@ class Higgsfield:
 
     # ── Fachliche Aufrufe ────────────────────────────────────────────────────
 
+    def _bestellen(self, modell: str, rumpf: dict, *, art: str, abbruch, melden,
+                   gemeldet=None, fortsetzen: str = "") -> Ergebnis:
+        """Bestellt einen Auftrag — oder holt einen schon bezahlten ab.
+
+        `gemeldet(kennung, modell)` erfährt die Nummer, sobald sie feststeht; die
+        Ablaufsteuerung legt sie im Zwischenstand ab. Mit `fortsetzen` wird genau dieser
+        Auftrag abgewartet, statt neu zu bestellen.
+        """
+        if fortsetzen:
+            kennung = fortsetzen
+            status_url = f"{self.basis}/requests/{kennung}/status"
+        else:
+            kennung, status_url = self.auftrag_erstellen(modell, rumpf, abbruch)
+            if gemeldet:
+                try:
+                    gemeldet(kennung, modell)
+                except Exception:
+                    pass
+        return self.warten(kennung, status_url, modell=modell, art=art,
+                           abbruch=abbruch, melden=melden)
+
     def bild(self, prompt: str, *, seitenverhaeltnis: str = "16:9", aufloesung: str = "1080p",
              modell: str = "", verbessern: bool = True, saat: int | None = None,
-             abbruch: threading.Event | None = None, melden=None) -> Ergebnis:
+             abbruch: threading.Event | None = None, melden=None,
+             gemeldet=None, fortsetzen: str = "") -> Ergebnis:
         """Erzeugt ein Standbild — das Startbild für die spätere Animation."""
         modell = modell or config.IMAGE_MODEL
         rumpf: dict = {"prompt": prompt[:config.MAX_PROMPT_CHARS],
@@ -487,15 +509,16 @@ class Higgsfield:
                        "enhance_prompt": bool(verbessern)}
         if saat and saat >= 1:
             rumpf["seed"] = int(saat)
-        kennung, status_url = self.auftrag_erstellen(modell, rumpf, abbruch)
-        return self.warten(kennung, status_url, modell=modell, art="bild",
-                           abbruch=abbruch, melden=melden)
+        return self._bestellen(modell, rumpf, art="bild", abbruch=abbruch, melden=melden,
+                               gemeldet=gemeldet, fortsetzen=fortsetzen)
 
     def video_aus_bild(self, prompt: str, bild_url: str, *, dauer: int = 5,
                        modell: str = "", saat: int | None = None,
                        bewegungen: list[str] | None = None,
                        seitenverhaeltnis: str = "16:9",
-                       abbruch: threading.Event | None = None, melden=None) -> Ergebnis:
+                       abbruch: threading.Event | None = None, melden=None,
+                       gemeldet=None, fortsetzen: str = "",
+                       bild_kennung: str = "") -> Ergebnis:
         """Animiert ein vorhandenes Bild. `dauer` wird auf einen vom Modell erlaubten Wert
         gebracht, statt den Dienst mit einem ungültigen Wert abzuweisen.
 
@@ -513,20 +536,19 @@ class Higgsfield:
         if bewegungen:
             # Die dop-Modelle erwarten Objekte, keine bloßen Zeichenketten.
             rumpf["motions"] = [{"id": kennung} for kennung in bewegungen if kennung]
-        kennung, status_url = self.auftrag_erstellen(modell, rumpf, abbruch)
-        return self.warten(kennung, status_url, modell=modell, art="video",
-                           abbruch=abbruch, melden=melden)
+        return self._bestellen(modell, rumpf, art="video", abbruch=abbruch, melden=melden,
+                               gemeldet=gemeldet, fortsetzen=fortsetzen)
 
     def video_aus_text(self, prompt: str, *, dauer: int = 6, modell: str = "",
                        seitenverhaeltnis: str = "16:9",
-                       abbruch: threading.Event | None = None, melden=None) -> Ergebnis:
+                       abbruch: threading.Event | None = None, melden=None,
+                       gemeldet=None, fortsetzen: str = "") -> Ergebnis:
         """Erzeugt ein Video ohne Zwischenbild."""
         modell = modell or config.T2V_MODEL
         rumpf = {"prompt": prompt[:config.MAX_PROMPT_CHARS],
                  "duration": erlaubte_dauer(modell, dauer)}
-        kennung, status_url = self.auftrag_erstellen(modell, rumpf, abbruch)
-        return self.warten(kennung, status_url, modell=modell, art="video",
-                           abbruch=abbruch, melden=melden)
+        return self._bestellen(modell, rumpf, art="video", abbruch=abbruch, melden=melden,
+                               gemeldet=gemeldet, fortsetzen=fortsetzen)
 
     # ── Selbstauskunft ───────────────────────────────────────────────────────
 
@@ -655,6 +677,13 @@ ERLAUBTE_DAUER: dict[str, tuple[int, ...]] = {
     "minimax/hailuo-02/pro/image-to-video": (6,),
     "minimax/hailuo-02/pro/text-to-video": (6,),
     "minimax/hailuo-02/standard/text-to-video": (6, 10),
+    # Modelle des Abo-Wegs (MCP). Quelle: offizielle Modellliste der Higgsfield-CLI,
+    # Stand 11.09.2026. Kling 3.0 nimmt 3–15 s; angeboten werden die runden Werte.
+    "kling3_0": (5, 10, 15),
+    "kling3_0_turbo": (5, 10, 15),
+    "seedance_2_0": (5, 10, 15),
+    "veo3_1": (4, 6, 8),
+    "minimax_hailuo": (6, 10),
 }
 
 #: Modelle, die ohne Startbild auskommen.
@@ -675,27 +704,66 @@ def braucht_startbild(modell: str) -> bool:
     return modell not in TEXT_ZU_VIDEO
 
 
-#: Für die Auswahl in der Oberfläche — nur nachweislich vorhandene Modelle.
+#: Für die Auswahl in der Oberfläche.
+#:
+#: `wege` sagt, über welchen Zugang ein Modell zu haben ist. Platform-API und Abo
+#: führen verschiedene Kataloge: Kling 3.0 oder Seedance gibt es nur im Abo, die
+#: DoP-Modelle nur über die Platform-API. Die Oberfläche zeigt nur, was der aktive Weg
+#: kann — sonst wählt der Kunde etwas, das erst nach dem bezahlten Startbild scheitert.
+#: `formate` sind die Seitenverhältnisse, die das Modell annimmt (leer: vom Startbild).
 VIDEOMODELLE = [
-    {"id": "kling-video/v2.6/pro/image-to-video", "name": "Kling 2.6 Pro",
-     "beschreibung": "Neueste Version, sehr saubere Bewegung. Startbild nötig.",
-     "dauer": [5, 10], "startbild": True, "empfohlen": True},
+    {"id": "kling-video/v2.6/pro/image-to-video", "name": "Kling 2.6",
+     "beschreibung": "Bewährt und verlässlich, sehr saubere Bewegung.",
+     "dauer": [5, 10], "startbild": True, "empfohlen": True,
+     "wege": ["platform", "abo"], "formate": ["16:9", "9:16", "1:1"]},
+    {"id": "kling3_0", "name": "Kling 3.0",
+     "beschreibung": "Neueste Kling-Generation, bis 15 Sekunden je Szene.",
+     "dauer": [5, 10, 15], "startbild": True, "empfohlen": False,
+     "wege": ["abo"], "formate": ["16:9", "9:16", "1:1"]},
+    {"id": "kling3_0_turbo", "name": "Kling 3.0 Turbo",
+     "beschreibung": "Schneller und günstiger — gut für Serien und Entwürfe.",
+     "dauer": [5, 10, 15], "startbild": True, "empfohlen": False,
+     "wege": ["abo"], "formate": ["16:9", "9:16", "1:1"]},
+    {"id": "seedance_2_0", "name": "Seedance 2.0",
+     "beschreibung": "Filmische Bewegung, Figuren bleiben über die Szene gleich.",
+     "dauer": [5, 10, 15], "startbild": True, "empfohlen": False,
+     "wege": ["abo"], "formate": ["16:9", "9:16", "4:3", "3:4", "1:1"]},
+    {"id": "veo3_1", "name": "Google Veo 3.1",
+     "beschreibung": "Sehr realistisch, kurze Szenen von 4 bis 8 Sekunden.",
+     "dauer": [4, 6, 8], "startbild": True, "empfohlen": False,
+     "wege": ["abo"], "formate": ["16:9", "9:16"]},
+    {"id": "minimax_hailuo", "name": "Minimax Hailuo",
+     "beschreibung": "Günstig, mit glaubwürdiger Physik. Format kommt vom Startbild.",
+     "dauer": [6, 10], "startbild": True, "empfohlen": False,
+     "wege": ["abo"], "formate": []},
     {"id": "kling-video/v2.1/master/image-to-video", "name": "Kling 2.1 Master",
-     "beschreibung": "Höchste Detailtreue, etwas langsamer. Startbild nötig.",
-     "dauer": [5, 10], "startbild": True, "empfohlen": False},
+     "beschreibung": "Höchste Detailtreue, etwas langsamer.",
+     "dauer": [5, 10], "startbild": True, "empfohlen": False,
+     "wege": ["platform"], "formate": []},
     {"id": "kling-video/v2.1/standard/image-to-video", "name": "Kling 2.1 Standard",
-     "beschreibung": "Günstiger und schnell. Startbild nötig.",
-     "dauer": [5, 10], "startbild": True, "empfohlen": False},
+     "beschreibung": "Günstiger und schnell.",
+     "dauer": [5, 10], "startbild": True, "empfohlen": False,
+     "wege": ["platform"], "formate": []},
     {"id": "higgsfield-ai/dop/turbo", "name": "Higgsfield DoP Turbo",
-     "beschreibung": "Kinolook mit wählbarer Kamerafahrt. Startbild nötig.",
-     "dauer": [5], "startbild": True, "empfohlen": False, "bewegungen": True},
+     "beschreibung": "Kinolook mit wählbarer Kamerafahrt.",
+     "dauer": [5], "startbild": True, "empfohlen": False, "bewegungen": True,
+     "wege": ["platform"], "formate": []},
     {"id": "higgsfield-ai/dop/standard", "name": "Higgsfield DoP Standard",
-     "beschreibung": "Ausgewogen, mit Kamerafahrten. Startbild nötig.",
-     "dauer": [5], "startbild": True, "empfohlen": False, "bewegungen": True},
+     "beschreibung": "Ausgewogen, mit Kamerafahrten.",
+     "dauer": [5], "startbild": True, "empfohlen": False, "bewegungen": True,
+     "wege": ["platform"], "formate": []},
     {"id": "minimax/hailuo-02/standard/text-to-video", "name": "Hailuo 02 (ohne Startbild)",
      "beschreibung": "Erzeugt direkt aus Text — schneller, weniger Kontrolle über den Look.",
-     "dauer": [6, 10], "startbild": False, "empfohlen": False},
+     "dauer": [6, 10], "startbild": False, "empfohlen": False,
+     "wege": ["platform"], "formate": []},
 ]
+
+
+def modelle_fuer_weg(weg: str) -> list[dict]:
+    """Die Videomodelle, die über diesen Weg zu haben sind. Der Probelauf kann alles."""
+    if weg not in ("platform", "abo"):
+        return list(VIDEOMODELLE)
+    return [m for m in VIDEOMODELLE if weg in m.get("wege", ("platform",))]
 
 BILDMODELLE = [
     {"id": "higgsfield-ai/soul/standard", "name": "Soul Standard",

@@ -38,6 +38,13 @@ def kein_abo(monkeypatch):
     """Standardmäßig ist kein Abo angemeldet — sonst hinge der Test am echten Zustand."""
     monkeypatch.setattr(higgsfield_mcp, "angemeldet", lambda: False)
     monkeypatch.setattr(videoquelle, "_letzter", "")
+    # Kein Test darf nach `tools/list` fragen — auf einem Rechner mit verbundenem Abo
+    # ginge die Frage sonst wirklich hinaus. Die frische Fehlzeit hält die Liste leer.
+    monkeypatch.setattr(higgsfield_mcp, "_WERKZEUGE",
+                        {"zeit": 0.0, "liste": [], "schemata": {},
+                         "fehlzeit": time.time()})
+    monkeypatch.setattr(higgsfield_mcp, "_FORM_GEMERKT", {})
+    monkeypatch.setattr(higgsfield_mcp, "_ERSATZ", {})
 
 
 # ── Auswahl ──────────────────────────────────────────────────────────────────
@@ -307,7 +314,7 @@ def ohne_modellliste(monkeypatch):
 def mit_modellliste(monkeypatch):
     liste = [{"id": "soul_2", "name": "Soul 2", "art": "image"},
              {"id": "soul_2_turbo", "name": "Soul 2 Turbo", "art": "image"},
-             {"id": "kling2_6_pro", "name": "Kling 2.6 Pro", "art": "video"},
+             {"id": "kling2_6", "name": "Kling 2.6", "art": "video"},
              {"id": "hailuo_02_standard", "name": "Hailuo 02", "art": "video"}]
     monkeypatch.setattr(higgsfield_mcp, "modellliste", lambda erneuern=False: list(liste))
     return liste
@@ -337,7 +344,16 @@ def test_liste_des_dienstes_schlaegt_die_tabelle(mit_modellliste):
     assert higgsfield_mcp.modell_aufloesen("higgsfield-ai/soul/standard",
                                            "bild") == "soul_2"
     assert higgsfield_mcp.modell_aufloesen("kling-video/v2.6/pro/image-to-video",
-                                           "video") == "kling2_6_pro"
+                                           "video") == "kling2_6"
+
+
+def test_ohne_liste_geht_nie_die_erfundene_kennung_hinaus(ohne_modellliste):
+    """Am 10.09.2026 ging ohne Modellliste `kling2_6_pro` hinaus — eine Kennung, die es
+    nie gab. Die echte heißt laut offizieller Modellliste `kling2_6`."""
+    assert higgsfield_mcp.modell_aufloesen("kling-video/v2.6/pro/image-to-video",
+                                           "video") == "kling2_6"
+    for kandidaten in higgsfield_mcp._UEBERSETZUNG.values():
+        assert "kling2_6_pro" not in kandidaten
 
 
 def test_bekannter_name_bleibt_unangetastet(mit_modellliste):
@@ -349,7 +365,7 @@ def test_unbekannter_wunsch_landet_bei_der_richtigen_art(mit_modellliste):
     """Kennt der Dienst nichts Ähnliches, muss wenigstens die Art stimmen — ein
     Bildmodell für einen Videoauftrag wäre nur ein anderer Fehler."""
     video = higgsfield_mcp.modell_aufloesen("voellig/anderes/modell", "video")
-    assert video in ("kling2_6_pro", "hailuo_02_standard")
+    assert video in ("kling2_6", "hailuo_02_standard")
 
 
 def test_fehlertext_findet_die_meldung_des_dienstes():
@@ -467,10 +483,13 @@ def bekanntes_startbild(monkeypatch):
     und das ist genau der Weg, den diese Tests nicht meinen.
     """
     monkeypatch.setattr(higgsfield_mcp, "_BILDJOBS", {})
-    monkeypatch.setattr(higgsfield_mcp, "_MEDIENFORM", {"objekt": False})
-    monkeypatch.setattr(higgsfield_mcp, "_BEWEGUNGEN", {"mitschicken": True})
     higgsfield_mcp._bild_merken("https://bild", "bildauftrag-7")
     return "https://bild"
+
+
+#: Wie das Startbild laut offizieller Doku in `medias` steht.
+def _medium(kennung: str) -> list[dict]:
+    return [{"value": kennung, "role": "start_image"}]
 
 
 def test_seitenverhaeltnis_kommt_beim_abo_an(monkeypatch, mit_modellliste,
@@ -489,7 +508,7 @@ def test_seitenverhaeltnis_kommt_beim_abo_an(monkeypatch, mit_modellliste,
         "Prompt", bekanntes_startbild, dauer=5,
         modell="kling-video/v2.6/pro/image-to-video", seitenverhaeltnis="9:16")
     assert gesehen["aspect_ratio"] == "9:16"
-    assert gesehen["model"] == "kling2_6_pro"
+    assert gesehen["model"] == "kling2_6"
 
 
 # ── Das Startbild muss beim Videomodell ankommen ─────────────────────────────
@@ -514,8 +533,9 @@ def test_startbild_geht_als_medias_hinaus_nie_als_adresse(monkeypatch, mit_model
         "Prompt", bekanntes_startbild, dauer=5,
         modell="kling-video/v2.6/pro/image-to-video")
 
-    assert gesehen["medias"] == ["bildauftrag-7"]
+    assert gesehen["medias"] == _medium("bildauftrag-7")
     assert "image_url" not in gesehen
+    assert "count" not in gesehen, "`count` kennt generate_video nicht"
     for wert in gesehen.values():
         assert "https://bild" != wert
 
@@ -541,20 +561,21 @@ def test_bildauftrag_wird_fuer_das_video_gemerkt(monkeypatch, mit_modellliste):
     dienst.video_aus_bild("Bewegung", bild.url, dauer=5,
                           modell="kling-video/v2.6/pro/image-to-video")
 
-    assert gesehen["medias"] == ["bild-42"]
+    assert gesehen["medias"] == _medium("bild-42")
 
 
-def test_beanstandete_medienform_wird_umgestellt(monkeypatch, mit_modellliste,
-                                                 bekanntes_startbild):
-    """Will der Dienst Objekte statt bloßer Kennungen, darf das keinen Auftrag
-    kosten — die andere Form wird versucht und gemerkt."""
+def test_kundenfehler_invalid_input_fuehrt_zur_naechsten_form(monkeypatch, mit_modellliste,
+                                                             bekanntes_startbild):
+    """Der Satz aus dem Logbuch vom 10.09.2026 nennt kein Feld. Er muss trotzdem als
+    Formfehler erkannt werden — die frühere Prüfung suchte nach „medias“ und übersah ihn."""
     versuche = []
 
     def gefaelscht(name, argumente, zeitlimit=60):
         if name == "generate_video":
             versuche.append(argumente["params"].get("medias"))
             if len(versuche) == 1:
-                return {"error": "invalid params.medias: expected objects"}
+                return {"error": "Input validation error: Invalid arguments for tool "
+                                 "generate_video: params: Invalid input"}
             return {"results": [{"id": "v2"}]}
         return {"status": "completed", "result_url": "https://x/y.mp4"}
 
@@ -563,9 +584,29 @@ def test_beanstandete_medienform_wird_umgestellt(monkeypatch, mit_modellliste,
         "Prompt", bekanntes_startbild, dauer=5,
         modell="kling-video/v2.6/pro/image-to-video")
 
-    assert versuche[0] == ["bildauftrag-7"]
-    assert versuche[1] == [{"id": "bildauftrag-7", "type": "image"}]
-    assert higgsfield_mcp._MEDIENFORM["objekt"] is True      # gemerkt für das nächste Mal
+    assert versuche[0] == _medium("bildauftrag-7")
+    assert versuche[1] == [{"value": "bildauftrag-7", "role": "image"}]
+    assert higgsfield_mcp._FORM_GEMERKT[("generate_video", "kling2_6")] == \
+        "doku_rolle_image"                                    # gemerkt fürs nächste Mal
+
+
+def test_andere_fehler_loesen_keine_formsuche_aus(monkeypatch, mit_modellliste,
+                                                  bekanntes_startbild):
+    """Nur Formfehler dürfen eine neue Form auslösen. Ein Serverfehler mit Nummer-
+    losigkeit wird gemeldet, nicht mit fünf weiteren Aufträgen beantwortet."""
+    versuche = []
+
+    def gefaelscht(name, argumente, zeitlimit=60):
+        if name == "generate_video":
+            versuche.append(1)
+            return {"error": "Something went wrong on our side"}
+        return {"status": "completed", "result_url": "https://x/y.mp4"}
+
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", gefaelscht)
+    with pytest.raises(errors.AnbieterFehler):
+        higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
+            "Prompt", bekanntes_startbild, dauer=5, modell="kling2_6")
+    assert len(versuche) == 1
 
 
 def test_fremde_adresse_wird_eingefuehrt(monkeypatch, mit_modellliste):
@@ -589,7 +630,7 @@ def test_fremde_adresse_wird_eingefuehrt(monkeypatch, mit_modellliste):
         "Prompt", "https://fremd/bild.jpg", dauer=5,
         modell="kling-video/v2.6/pro/image-to-video")
 
-    assert gesehen["medias"] == ["m-123"]
+    assert gesehen["medias"] == _medium("m-123")
 
 
 def test_ohne_import_werkzeug_gibt_es_eine_deutsche_meldung(monkeypatch,
@@ -634,27 +675,25 @@ def test_nur_import_werkzeuge_werden_angefasst():
         m._WERKZEUGE.update({"zeit": 0.0, "liste": []})
 
 
-def test_beanstandete_bewegung_kostet_keinen_auftrag(monkeypatch, mit_modellliste,
-                                                     bekanntes_startbild):
-    """Kamerabewegungen sind Beiwerk. Kennt das Modell sie nicht, entsteht der Clip
-    ohne sie — statt gar nicht."""
-    versuche = []
+def test_felder_ausserhalb_des_schemas_gehen_nicht_hinaus(monkeypatch, mit_modellliste,
+                                                         bekanntes_startbild):
+    """Kamerabewegungen und `seed` gehen nur hinaus, wenn das Schema sie nennt. Ein
+    unbekanntes Feld ist bei einem strengen Schema ein abgewiesener Auftrag."""
+    gesehen = []
 
     def gefaelscht(name, argumente, zeitlimit=60):
         if name == "generate_video":
-            versuche.append(argumente["params"].get("motions"))
-            if len(versuche) == 1:
-                return {"error": "unsupported field: motions"}
+            gesehen.append(argumente["params"])
             return {"results": [{"id": "v4"}]}
         return {"status": "completed", "result_url": "https://x/y.mp4"}
 
     monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", gefaelscht)
     higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
-        "Prompt", bekanntes_startbild, dauer=5, bewegungen=["zoom_in"],
+        "Prompt", bekanntes_startbild, dauer=5, bewegungen=["zoom_in"], saat=7,
         modell="kling-video/v2.6/pro/image-to-video")
 
-    assert versuche[0] == [{"id": "zoom_in"}]
-    assert versuche[1] is None
+    assert "motions" not in gesehen[0]
+    assert "seed" not in gesehen[0]
 
 
 def test_werkzeugliste_vertraegt_jede_form():

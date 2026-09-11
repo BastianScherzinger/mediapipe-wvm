@@ -26,9 +26,11 @@ das der Unterschied zwischen Zuschauen und Arbeitenlassen.
 """
 from __future__ import annotations
 
+import inspect
+import json
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import (config, errors, higgsfield, jobstore, library, logbook, media,
@@ -168,6 +170,13 @@ class Einstellungen:
     bewegung: str = ""             # Kennung einer Kamerabewegung (nur dop-Modelle)
     weiche_uebergaenge: bool = True
     formate: tuple[str, ...] = ()  # gleich mit erzeugen; sonst später per Klick
+    #: Kennung eines gescheiterten Auftrags, dessen Drehbuch, Startbilder und fertige
+    #: Szenen übernommen werden sollen. Leer: ein ganz neuer Auftrag.
+    wiederholung_von: str = ""
+    #: „video“ (Briefing → Higgsfield) oder „webseite“ (Link → TikTok-Werbevideo).
+    art: str = "video"
+    #: Nur bei `art == "webseite"`: Link und Gestaltungswünsche.
+    webseite: dict = field(default_factory=dict)
 
     def als_dict(self) -> dict:
         return {"briefing": self.briefing, "modus": self.modus, "woertlich": self.woertlich,
@@ -177,7 +186,9 @@ class Einstellungen:
                 "zielgruppe": self.zielgruppe, "tonfall": self.tonfall,
                 "bewegung": self.bewegung,
                 "weiche_uebergaenge": self.weiche_uebergaenge,
-                "formate": list(self.formate)}
+                "formate": list(self.formate),
+                "wiederholung_von": self.wiederholung_von,
+                "art": self.art, "webseite": dict(self.webseite)}
 
 
 _SEITENVERHAELTNISSE = ("16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2")
@@ -208,6 +219,11 @@ def einstellungen_pruefen(roh: dict) -> Einstellungen:
 
     gewuenschte = [f for f in (roh.get("formate") or []) if f in media.FORMATE]
 
+    if str(roh.get("art") or "") == "webseite":
+        # Der Link steht an der Stelle des Briefings: Er ist das, woraus das Video entsteht.
+        from . import webwerbung
+        return webwerbung.einstellungen_pruefen(roh, Einstellungen)
+
     return Einstellungen(
         briefing=briefing,
         modus="frei" if str(roh.get("modus") or "") == "frei" else "formular",
@@ -222,6 +238,7 @@ def einstellungen_pruefen(roh: dict) -> Einstellungen:
         bewegung=str(roh.get("bewegung") or "").strip()[:64],
         weiche_uebergaenge=roh.get("weiche_uebergaenge", True) is not False,
         formate=tuple(gewuenschte),
+        wiederholung_von=str(roh.get("wiederholung_von") or "").strip()[:32],
     )
 
 
@@ -303,6 +320,28 @@ def einreihen(roh: dict) -> tuple[jobstore.Auftrag, bool]:
     return auftrag, True
 
 
+def wiederholen(auftrag_id: str) -> tuple[jobstore.Auftrag, bool]:
+    """Startet einen gescheiterten oder abgebrochenen Auftrag erneut.
+
+    Übernommen werden Drehbuch und Ordner — und damit alles, was dort schon liegt und
+    bezahlt ist: fertige Szenen, Startbilder und die Nummern von Aufträgen, die beim
+    Dienst noch laufen. Bezahlt wird nur, was wirklich fehlt. Bis zum 10.09.2026 hieß
+    „noch einmal versuchen“ für den Kunden: jedes Startbild ein zweites Mal kaufen.
+    """
+    alt = jobstore.holen(auftrag_id)
+    if alt is None:
+        raise errors.EingabeFehler("Diesen Auftrag gibt es nicht.", ursprung=QUELLE)
+    if alt.zustand not in (jobstore.FEHLER, jobstore.ABGEBROCHEN):
+        raise errors.EingabeFehler(
+            "Nur gescheiterte oder abgebrochene Aufträge lassen sich wiederholen.",
+            "Dieser Auftrag läuft noch oder ist schon fertig.", ursprung=QUELLE)
+    roh = dict(alt.einstellungen or {})
+    roh["briefing"] = roh.get("briefing") or alt.briefing
+    roh["wiederholung_von"] = alt.id
+    logbook.info(QUELLE, f"Auftrag wird wiederholt: {alt.titel[:60]}", job=alt.id)
+    return einreihen(roh)
+
+
 def _naechsten_starten() -> None:
     """Holt den nächsten Wartenden herein. **Ohne gehaltene `_sperre` aufrufen.**
 
@@ -338,18 +377,31 @@ def _bearbeiten(auftrag_id: str, e: Einstellungen, abbruch: threading.Event) -> 
 
     try:
         jobstore.aktualisieren(auftrag_id, zustand=jobstore.LAEUFT, block="briefing")
-        for block in jobstore.BLOECKE:
+        if e.art == "webseite":
+            from . import webwerbung
+            bloecke = webwerbung.BLOECKE
+        else:
+            bloecke = jobstore.BLOECKE
+        for block in bloecke:
             _block(auftrag_id, block, "wartend")
 
-        drehbuch = _schritt_briefing_und_claude(auftrag_id, e, abbruch)
-        ordner = jobstore.ordner_fuer(jobstore.holen(auftrag_id), drehbuch.dateiname)
-        jobstore.aktualisieren(auftrag_id, ordner=str(ordner), titel=drehbuch.titel,
-                               drehbuch=drehbuch.als_dict())
+        if e.art == "webseite":
+            ergebnis = webwerbung.ablauf(auftrag_id, e, abbruch)
+        else:
+            drehbuch = _schritt_briefing_und_claude(auftrag_id, e, abbruch)
+            alt = jobstore.holen(e.wiederholung_von) if e.wiederholung_von else None
+            if alt is not None and alt.ordner and Path(alt.ordner).is_dir():
+                ordner = Path(alt.ordner)        # dort liegt, was schon bezahlt ist
+            else:
+                ordner = jobstore.ordner_fuer(jobstore.holen(auftrag_id),
+                                              drehbuch.dateiname)
+            jobstore.aktualisieren(auftrag_id, ordner=str(ordner), titel=drehbuch.titel,
+                                   drehbuch=drehbuch.als_dict())
 
-        szenenclips, ausgefallen = _schritt_bild_und_video(auftrag_id, e, drehbuch,
-                                                           ordner, abbruch)
-        ergebnis = _schritt_ausgabe(auftrag_id, e, drehbuch, szenenclips, ordner,
-                                    abbruch, ausgefallen)
+            szenenclips, ausgefallen = _schritt_bild_und_video(auftrag_id, e, drehbuch,
+                                                               ordner, abbruch)
+            ergebnis = _schritt_ausgabe(auftrag_id, e, drehbuch, szenenclips, ordner,
+                                        abbruch, ausgefallen)
 
         jobstore.aktualisieren(auftrag_id, zustand=jobstore.FERTIG, block="ausgabe",
                                ergebnis=ergebnis)
@@ -383,6 +435,7 @@ def _bearbeiten(auftrag_id: str, e: Einstellungen, abbruch: threading.Event) -> 
                          job=auftrag_id)
 
     finally:
+        _DIENST_JE_AUFTRAG.pop(auftrag_id, None)
         with _sperre:
             if _aktuell is not None and _aktuell.auftrag_id == auftrag_id:
                 _aktuell = None
@@ -410,10 +463,17 @@ def _schritt_briefing_und_claude(auftrag_id: str, e: Einstellungen,
     _block(auftrag_id, "briefing", "aktiv", "Eingaben werden geprüft")
     _pruefe_abbruch(abbruch)
 
+    # Erst prüfen, ob Higgsfield den Auftrag so überhaupt annehmen kann — bevor das
+    # Sprachmodell eine Minute arbeitet und lange bevor ein Startbild bezahlt ist.
+    dienst = videoquelle.aktiv()
+    _DIENST_JE_AUFTRAG[auftrag_id] = dienst
+    _vorpruefen(auftrag_id, e, dienst)
+
     beschreibung = (f"{e.szenen} Szene(n) à {e.sekunden} s"
                     if e.szenen > 1 else f"Einzelclip, {e.sekunden} s")
     logbook.info(QUELLE, f"Briefing angenommen · {beschreibung} · "
-                         f"{higgsfield.modell_info(e.videomodell)['name']}", job=auftrag_id)
+                         f"{higgsfield.modell_info(e.videomodell)['name']} · "
+                         f"{e.seitenverhaeltnis}", job=auftrag_id)
     _block(auftrag_id, "briefing", "fertig", beschreibung)
     _uebergang(auftrag_id, "briefing", "claude")
 
@@ -421,6 +481,18 @@ def _schritt_briefing_und_claude(auftrag_id: str, e: Einstellungen,
     _fortschritt(auftrag_id, "claude", 0.1, 45, "Sprachmodell arbeitet")
     jobstore.aktualisieren(auftrag_id, block="claude")
     _pruefe_abbruch(abbruch)
+
+    alt = jobstore.holen(e.wiederholung_von) if e.wiederholung_von else None
+    uebernommen = promptsmith.drehbuch_aus_dict(alt.drehbuch) if alt is not None else None
+    if uebernommen is not None:
+        logbook.info(QUELLE, f"Drehbuch „{uebernommen.titel}“ vom letzten Versuch wird "
+                             "übernommen — damit passen Startbilder und fertige Szenen "
+                             "weiter dazu.", job=auftrag_id)
+        _fortschritt(auftrag_id, "claude", 1.0, 0, "übernommen")
+        _block(auftrag_id, "claude", "fertig",
+               f"{len(uebernommen.szenen)} Szene(n) · übernommen",
+               {"drehbuch": uebernommen.als_dict()})
+        return uebernommen
 
     if e.modus == "frei" and e.woertlich:
         drehbuch = promptsmith.eigenen_prompt_woertlich(
@@ -458,8 +530,9 @@ def _schritt_bild_und_video(auftrag_id: str, e: Einstellungen,
     bezahlt hat, soll sie auch bekommen.
     """
     # Einmal je Auftrag festlegen, wer die Bilder und Videos macht — mitten im Lauf
-    # zu wechseln würde zu Szenen führen, die nicht zueinander passen.
-    dienst = videoquelle.aktiv()
+    # zu wechseln würde zu Szenen führen, die nicht zueinander passen. Festgelegt wurde
+    # er schon bei der Vorprüfung; nur wer diesen Schritt direkt aufruft, wählt hier.
+    dienst = _DIENST_JE_AUFTRAG.get(auftrag_id) or videoquelle.aktiv()
 
     braucht_bild = higgsfield.braucht_startbild(e.videomodell)
     anzahl = len(drehbuch.szenen)
@@ -520,6 +593,107 @@ def _schritt_bild_und_video(auftrag_id: str, e: Einstellungen,
 #: Weitermachen sinnlos — die nächste Szene liefe in genau dieselbe Wand.
 _TOEDLICH = (errors.GuthabenFehler, errors.ZugangFehler, errors.KonfigurationsFehler)
 
+#: Welcher Dienst einen Auftrag ausführt — festgelegt bei der Vorprüfung.
+_DIENST_JE_AUFTRAG: dict[str, object] = {}
+
+
+def _vorpruefen(auftrag_id: str, e: Einstellungen, dienst) -> None:
+    """Klärt vor dem ersten bezahlten Schritt, ob der Auftrag so durchgehen kann.
+
+    Zwei Dinge:
+      * **Passt das Modell zum Weg?** Kling 3.0 gibt es nur im Abo, die DoP-Modelle nur
+        über die Platform-API. Ohne diese Prüfung fiele das erst auf, wenn das erste
+        Startbild bezahlt ist.
+      * **Was sagt der Dienst selbst?** Der Abo-Weg liest kostenlos sein Schema und
+        nennt das Seitenverhältnis und die Dauer, die das Modell wirklich annimmt.
+        Montage und Drehbuch richten sich dann danach.
+    """
+    weg = videoquelle.weg_von(dienst)
+    info = higgsfield.modell_info(e.videomodell)
+    wege = info.get("wege") or ["platform", "abo"]
+    if weg in ("platform", "abo") and weg not in wege:
+        andere = "über das Higgsfield-Abo" if "abo" in wege else "über die Platform-API"
+        raise errors.KonfigurationsFehler(
+            f"„{info.get('name', e.videomodell)}“ gibt es nur {andere}.",
+            "Bitte im Formular ein anderes Modell wählen" +
+            (" oder oben auf „Abo verbinden“ klicken." if "abo" in wege else "."),
+            ursprung=QUELLE)
+
+    pruefen = getattr(dienst, "vorpruefen", None)
+    if not callable(pruefen):
+        return
+    _block(auftrag_id, "briefing", "aktiv", "Higgsfield wird befragt")
+    ergebnis = pruefen(videomodell=e.videomodell,
+                       bildmodell=e.bildmodell or config.IMAGE_MODEL,
+                       seitenverhaeltnis=e.seitenverhaeltnis, dauer=e.sekunden,
+                       mit_startbild=higgsfield.braucht_startbild(e.videomodell)) or {}
+
+    format_neu = str(ergebnis.get("seitenverhaeltnis") or "")
+    if format_neu and format_neu != e.seitenverhaeltnis:
+        logbook.warnung(QUELLE, f"{info.get('name', e.videomodell)} kennt kein "
+                                f"{e.seitenverhaeltnis} — das Video entsteht in "
+                                f"{format_neu}.", job=auftrag_id)
+        e.seitenverhaeltnis = format_neu
+    dauer_neu = int(ergebnis.get("dauer") or 0)
+    if dauer_neu and dauer_neu != e.sekunden:
+        logbook.info(QUELLE, f"Szenenlänge auf {dauer_neu} s angepasst — so lang nimmt "
+                             "das Modell sie an.", job=auftrag_id)
+        e.sekunden = dauer_neu
+
+
+def _aufrufen(methode, *argumente, **benannt):
+    """Ruft eine Dienstmethode und lässt weg, was sie nicht kennt.
+
+    `gemeldet`, `fortsetzen` und `bild_kennung` sind neu. Ein Dienst, der sie (noch)
+    nicht annimmt — eine Attrappe, ein künftiger Weg —, soll trotzdem funktionieren.
+    """
+    try:
+        zeichen = inspect.signature(methode).parameters
+    except (TypeError, ValueError):
+        return methode(*argumente, **benannt)
+    if not any(p.kind == p.VAR_KEYWORD for p in zeichen.values()):
+        benannt = {k: v for k, v in benannt.items() if k in zeichen}
+    return methode(*argumente, **benannt)
+
+
+# ── Zwischenstand je Videoordner ─────────────────────────────────────────────
+#
+# Was schon bezahlt ist, steht hier: Nummer und Adresse jedes Startbilds, die Nummer
+# jedes Videoauftrags, sobald der Dienst sie vergibt. Ein Wiederholungslauf liest das
+# und bezahlt nichts zweimal — ein fertiger Clip wird übernommen, ein laufender Auftrag
+# abgeholt, ein vorhandenes Startbild wiederverwendet.
+
+_ZWISCHENSTAND = "zwischenstand.json"
+
+#: Wie lange ein gemerktes Startbild beim Dienst als verwendbar gilt. Die Adressen der
+#: Platform-API laufen irgendwann ab; Auftragsnummern halten länger, aber nicht ewig.
+_BILD_HALTBAR = 12 * 3600
+
+
+def _zwischenstand_lesen(ordner: Path) -> dict:
+    try:
+        daten = json.loads((Path(ordner) / _ZWISCHENSTAND).read_text(encoding="utf-8"))
+        return daten if isinstance(daten, dict) else {}
+    except Exception:
+        return {}
+
+
+def _zwischenstand_merken(ordner: Path, stelle: int, weg: str, **felder) -> None:
+    try:
+        daten = _zwischenstand_lesen(ordner)
+        szenen = daten.setdefault("szenen", {})
+        eintrag = szenen.setdefault(str(stelle), {})
+        eintrag.update(felder)
+        eintrag["weg"] = weg
+        eintrag["zeit"] = time.time()
+        ziel = Path(ordner) / _ZWISCHENSTAND
+        vorlaeufig = ziel.with_suffix(".tmp")
+        vorlaeufig.write_text(json.dumps(daten, ensure_ascii=False, indent=1),
+                              encoding="utf-8")
+        vorlaeufig.replace(ziel)
+    except Exception as fehler:
+        logbook.debug(QUELLE, f"Zwischenstand nicht geschrieben: {type(fehler).__name__}")
+
 
 def _eine_szene(auftrag_id: str, e: Einstellungen, szene: promptsmith.Szene,
                 stelle: int, anzahl: int, ordner: Path, dienst, braucht_bild: bool,
@@ -529,28 +703,61 @@ def _eine_szene(auftrag_id: str, e: Einstellungen, szene: promptsmith.Szene,
     Steht bewusst für sich: Erst dadurch kann der Aufrufer den Ausfall einer einzelnen
     Szene auffangen, ohne die bereits bezahlten Clips mitzureißen.
     """
+    weg = videoquelle.weg_von(dienst) or getattr(dienst, "name", "")
+    stand = (_zwischenstand_lesen(ordner).get("szenen") or {}).get(str(stelle)) or {}
+    gleicher_weg = stand.get("weg") == weg
+    frisch = time.time() - float(stand.get("zeit") or 0) < _BILD_HALTBAR
+    clippfad = ordner / f"szene_{stelle:02d}.mp4"
+    bildpfad = ordner / f"szene_{stelle:02d}_start.jpg"
+
+    # ── Schon fertig? ────────────────────────────────────────────────────
+    # Ein Clip aus einem früheren Versuch ist bezahlt und passt zum übernommenen
+    # Drehbuch. Ihn neu zu bestellen, wäre Geld für nichts.
+    if clippfad.exists():
+        try:
+            media.pruefe_video(clippfad)
+            logbook.info(QUELLE, f"Szene {stelle}/{anzahl} ist vom letzten Versuch fertig "
+                                 "— wird übernommen, kostet nichts.", job=auftrag_id)
+            if braucht_bild and stelle == anzahl:
+                _block(auftrag_id, "bild", "fertig", f"{anzahl} Startbild(er)")
+                _uebergang(auftrag_id, "bild", "video")
+            return clippfad
+        except errors.StudioFehler:
+            clippfad.unlink(missing_ok=True)          # kaputt — neu erzeugen
+
     # ── Startbild ────────────────────────────────────────────────────────
+    bild_kennung = ""
     if braucht_bild:
         jobstore.aktualisieren(auftrag_id, block="bild")
         _block(auftrag_id, "bild", "aktiv", f"Szene {stelle} von {anzahl}")
 
-        def bildmeldung(anteil, rest, _zustand, _s=stelle):
-            gesamt = ((_s - 1) + anteil) / anzahl
-            _fortschritt(auftrag_id, "bild", gesamt, rest,
-                         f"Szene {_s}/{anzahl}")
+        if (bildpfad.exists() and stand.get("bild_url") and stand.get("bild_job")
+                and gleicher_weg and frisch and weg != "demo"):
+            bilder[stelle] = stand["bild_url"]
+            bild_kennung = str(stand["bild_job"])
+            logbook.info("Startbild", f"Szene {stelle}/{anzahl}: Startbild vom letzten "
+                                      "Versuch wird wiederverwendet — kostet nichts.",
+                         job=auftrag_id)
+        else:
+            def bildmeldung(anteil, rest, _zustand, _s=stelle):
+                gesamt = ((_s - 1) + anteil) / anzahl
+                _fortschritt(auftrag_id, "bild", gesamt, rest,
+                             f"Szene {_s}/{anzahl}")
 
-        ergebnis = dienst.bild(
-            szene.bild_prompt, seitenverhaeltnis=e.seitenverhaeltnis,
-            modell=e.bildmodell or config.IMAGE_MODEL,
-            abbruch=abbruch, melden=bildmeldung)
-        bilder[stelle] = ergebnis.url
+            ergebnis = _aufrufen(
+                dienst.bild, szene.bild_prompt, seitenverhaeltnis=e.seitenverhaeltnis,
+                modell=e.bildmodell or config.IMAGE_MODEL,
+                abbruch=abbruch, melden=bildmeldung)
+            bilder[stelle] = ergebnis.url
+            bild_kennung = str(ergebnis.request_id or "")
 
-        # Herunterladen, damit der Kunde das Startbild behält und die Oberfläche
-        # es anzeigen kann — die Adresse beim Anbieter läuft nach kurzer Zeit ab.
-        bildpfad = ordner / f"szene_{stelle:02d}_start.jpg"
-        dienst.herunterladen(ergebnis.url, bildpfad, abbruch)
-        logbook.erfolg("Startbild", f"Szene {stelle}/{anzahl} steht "
-                                    f"({ergebnis.dauer:.0f} s).", job=auftrag_id)
+            # Herunterladen, damit der Kunde das Startbild behält und die Oberfläche
+            # es anzeigen kann — die Adresse beim Anbieter läuft nach kurzer Zeit ab.
+            dienst.herunterladen(ergebnis.url, bildpfad, abbruch)
+            _zwischenstand_merken(ordner, stelle, weg, bild_url=ergebnis.url,
+                                  bild_job=bild_kennung, video_job="")
+            logbook.erfolg("Startbild", f"Szene {stelle}/{anzahl} steht "
+                                        f"({ergebnis.dauer:.0f} s).", job=auftrag_id)
         logbook.ereignis("startbild", {"szene": stelle,
                                        "datei": library.web_pfad(bildpfad)},
                          job=auftrag_id)
@@ -576,20 +783,43 @@ def _eine_szene(auftrag_id: str, e: Einstellungen, szene: promptsmith.Szene,
     # Das Seitenverhältnis geht an jeden Weg mit. Die Platform-API übergeht es
     # (ihre Videomodelle übernehmen das Format vom Startbild), der Abo-Weg braucht
     # es — dort entstünde sonst ein 16:9-Clip, obwohl Hochformat bestellt war.
-    if braucht_bild:
-        ergebnis = dienst.video_aus_bild(
-            szene.video_prompt, bilder[stelle], dauer=szene.dauer,
-            modell=e.videomodell,
-            bewegungen=[e.bewegung] if e.bewegung else None,
-            seitenverhaeltnis=e.seitenverhaeltnis,
-            abbruch=abbruch, melden=videomeldung)
-    else:
-        ergebnis = dienst.video_aus_text(
-            szene.video_prompt, dauer=szene.dauer, modell=e.videomodell,
-            seitenverhaeltnis=e.seitenverhaeltnis,
-            abbruch=abbruch, melden=videomeldung)
+    def gemeldet(kennung, _modell, _s=stelle):
+        _zwischenstand_merken(ordner, _s, weg, video_job=str(kennung))
 
-    clippfad = ordner / f"szene_{stelle:02d}.mp4"
+    def bestellen(fortsetzen: str):
+        # `e.sekunden` statt `szene.dauer`: Die Vorprüfung kann die Länge an das
+        # angepasst haben, was das Modell wirklich annimmt.
+        dauer = e.sekunden or szene.dauer
+        if braucht_bild:
+            return _aufrufen(
+                dienst.video_aus_bild, szene.video_prompt, bilder[stelle], dauer=dauer,
+                modell=e.videomodell,
+                bewegungen=[e.bewegung] if e.bewegung else None,
+                seitenverhaeltnis=e.seitenverhaeltnis,
+                abbruch=abbruch, melden=videomeldung, gemeldet=gemeldet,
+                fortsetzen=fortsetzen, bild_kennung=bild_kennung)
+        return _aufrufen(
+            dienst.video_aus_text, szene.video_prompt, dauer=dauer, modell=e.videomodell,
+            seitenverhaeltnis=e.seitenverhaeltnis,
+            abbruch=abbruch, melden=videomeldung, gemeldet=gemeldet,
+            fortsetzen=fortsetzen)
+
+    offen = str(stand.get("video_job") or "") if gleicher_weg and weg != "demo" else ""
+    try:
+        ergebnis = bestellen(offen)
+    except (errors.AbbruchFehler, *_TOEDLICH):
+        raise
+    except errors.StudioFehler:
+        if not offen:
+            raise
+        # Der gemerkte Auftrag ist beim Dienst gescheitert oder unbekannt. Dann eben
+        # neu bestellen — aber nur dieses eine Mal, und ohne die alte Nummer.
+        logbook.warnung(QUELLE, f"Szene {stelle}: der offene Auftrag vom letzten Versuch "
+                                "ist nicht mehr abholbar — es wird neu bestellt.",
+                        job=auftrag_id)
+        _zwischenstand_merken(ordner, stelle, weg, video_job="")
+        ergebnis = bestellen("")
+
     dienst.herunterladen(ergebnis.url, clippfad, abbruch)
     media.pruefe_video(clippfad)
     logbook.erfolg("Higgsfield", f"Szene {stelle}/{anzahl} fertig "

@@ -59,7 +59,8 @@ class Probelauf:
 
     def bild(self, prompt: str, *, seitenverhaeltnis: str = "16:9", aufloesung: str = "1080p",
              modell: str = "", verbessern: bool = True, saat: int | None = None,
-             abbruch: threading.Event | None = None, melden=None) -> higgsfield.Ergebnis:
+             abbruch: threading.Event | None = None, melden=None,
+             gemeldet=None, fortsetzen: str = "") -> higgsfield.Ergebnis:
         ziel = config.DATA_DIR / "probelauf" / f"bild_{int(time.time() * 1000)}.jpg"
         ziel.parent.mkdir(parents=True, exist_ok=True)
         breite, hoehe = self._masse(seitenverhaeltnis)
@@ -75,7 +76,8 @@ class Probelauf:
                        bewegungen: list[str] | None = None,
                        seitenverhaeltnis: str = "16:9",
                        abbruch: threading.Event | None = None,
-                       melden=None) -> higgsfield.Ergebnis:
+                       melden=None, gemeldet=None, fortsetzen: str = "",
+                       bild_kennung: str = "") -> higgsfield.Ergebnis:
         ziel = config.DATA_DIR / "probelauf" / f"clip_{int(time.time() * 1000)}.mp4"
         ziel.parent.mkdir(parents=True, exist_ok=True)
         breite, hoehe = self._masse(seitenverhaeltnis)
@@ -87,7 +89,8 @@ class Probelauf:
     def video_aus_text(self, prompt: str, *, dauer: int = 6, modell: str = "",
                        seitenverhaeltnis: str = "16:9",
                        abbruch: threading.Event | None = None,
-                       melden=None) -> higgsfield.Ergebnis:
+                       melden=None, gemeldet=None,
+                       fortsetzen: str = "") -> higgsfield.Ergebnis:
         return self.video_aus_bild(prompt, "", dauer=dauer,
                                    seitenverhaeltnis=seitenverhaeltnis,
                                    abbruch=abbruch, melden=melden)
@@ -188,6 +191,22 @@ def aktiv():
         "Es steht kein Weg zur Videoerzeugung bereit.",
         "Entweder HIGGSFIELD_API_KEY eintragen, das Abo im Dashboard anmelden oder "
         "MPW_VIDEO_CHAIN auf „demo“ stellen.", ursprung=QUELLE)
+
+
+def weg_von(dienst) -> str:
+    """„platform“, „abo“ oder „demo“ — welcher Weg ist dieser Dienst? Leer: unbekannt."""
+    for name, weg in _wege().items():
+        if weg is dienst:
+            return name
+    return ""
+
+
+def aktiver_weg() -> str:
+    """Der Kurzname des Weges, der den nächsten Auftrag ausführt — für die Oberfläche."""
+    try:
+        return weg_von(aktiv())
+    except errors.StudioFehler:
+        return ""
 
 
 def name_des_aktiven() -> str:
