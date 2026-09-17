@@ -72,6 +72,17 @@ def _umgebung(mit_token: bool = True) -> dict:
     return umgebung
 
 
+def umgebung(mit_token: bool = True) -> dict:
+    """Dieselbe Umgebung für andere Aufrufer der CLI — etwa den Filmagenten.
+
+    Sie gehört hierher und nicht dorthin: Die beiden Fallstricke oben (Abo-Token setzen,
+    API-Schlüssel entfernen) gelten für **jeden** Aufruf der CLI, und eine zweite Kopie
+    dieser Logik würde beim nächsten Fund an einer Stelle nachgezogen und an der anderen
+    vergessen.
+    """
+    return _umgebung(mit_token)
+
+
 #: Textbausteine, an denen ein Anmeldeproblem der CLI zu erkennen ist.
 _ANMELDEWORTE = ("not logged in", "login", "unauthorized", "authentication",
                  "oauth", "invalid token", "expired", "revoked", "401")

@@ -173,10 +173,13 @@ class Einstellungen:
     #: Kennung eines gescheiterten Auftrags, dessen Drehbuch, Startbilder und fertige
     #: Szenen übernommen werden sollen. Leer: ein ganz neuer Auftrag.
     wiederholung_von: str = ""
-    #: „video“ (Briefing → Higgsfield) oder „webseite“ (Link → TikTok-Werbevideo).
+    #: „video“ (Briefing → Higgsfield), „webseite“ (Link → TikTok-Werbevideo) oder
+    #: „premium“ (Claude baut die Komposition selbst — beide Formate).
     art: str = "video"
     #: Nur bei `art == "webseite"`: Link und Gestaltungswünsche.
     webseite: dict = field(default_factory=dict)
+    #: Nur bei `art == "premium"`: Quelle, Antworten des Formulars, Modellwahl.
+    premium: dict = field(default_factory=dict)
 
     def als_dict(self) -> dict:
         return {"briefing": self.briefing, "modus": self.modus, "woertlich": self.woertlich,
@@ -188,7 +191,8 @@ class Einstellungen:
                 "weiche_uebergaenge": self.weiche_uebergaenge,
                 "formate": list(self.formate),
                 "wiederholung_von": self.wiederholung_von,
-                "art": self.art, "webseite": dict(self.webseite)}
+                "art": self.art, "webseite": dict(self.webseite),
+                "premium": dict(self.premium)}
 
 
 _SEITENVERHAELTNISSE = ("16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2")
@@ -201,6 +205,10 @@ def einstellungen_pruefen(roh: dict) -> Einstellungen:
         # Der Link steht an der Stelle des Briefings: Er ist das, woraus das Video entsteht.
         from . import webwerbung
         return webwerbung.einstellungen_pruefen(roh, Einstellungen)
+
+    if str(roh.get("art") or "") == "premium":
+        from . import bragstudio
+        return bragstudio.einstellungen_pruefen(roh, Einstellungen)
 
     briefing = str(roh.get("briefing") or "").strip()
     if len(briefing) < 3:
@@ -418,6 +426,9 @@ def _bearbeiten(auftrag_id: str, e: Einstellungen, abbruch: threading.Event) -> 
         if e.art == "webseite":
             from . import webwerbung
             bloecke = webwerbung.BLOECKE
+        elif e.art == "premium":
+            from . import bragstudio
+            bloecke = bragstudio.BLOECKE
         else:
             bloecke = jobstore.BLOECKE
         for block in bloecke:
@@ -425,6 +436,8 @@ def _bearbeiten(auftrag_id: str, e: Einstellungen, abbruch: threading.Event) -> 
 
         if e.art == "webseite":
             ergebnis = webwerbung.ablauf(auftrag_id, e, abbruch)
+        elif e.art == "premium":
+            ergebnis = bragstudio.ablauf(auftrag_id, e, abbruch)
         else:
             drehbuch = _schritt_briefing_und_claude(auftrag_id, e, abbruch)
             alt = jobstore.holen(e.wiederholung_von) if e.wiederholung_von else None

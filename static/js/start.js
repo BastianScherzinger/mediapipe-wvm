@@ -38,9 +38,10 @@
 
     document.title = `${start.app.name} ${start.app.version} — KI-Video-Studio`;
 
-    MPW.ablauf.aufbauen(start.bloecke, start.webseite?.bloecke);
+    MPW.ablauf.aufbauen(start.bloecke, start.webseite?.bloecke, start.premium?.bloecke);
     MPW.formular.aufbauen(start);
     MPW.webseite.aufbauen(start);
+    MPW.premium.aufbauen(start);
     MPW.bibliothek.aufbauen();
     MPW.aktualisierung.aufbauen();
     MPW.abo.aufbauen();
@@ -55,6 +56,9 @@
 
     MPW.stromVerbinden();
     MPW.beiEreignis("auftrag", auftragsereignis);
+    // Der Auftrag, den Claude für den Premium-Film geschrieben hat: Er wird angezeigt,
+    // sobald er steht — nicht erst am Ende. Der Kunde soll sehen, was gebaut wird.
+    MPW.beiEreignis("premium", (nachricht) => MPW.premium.promptZeigen(nachricht.master_prompt));
     MPW.beiEreignis("warteschlange", () => zustandAbgleichen());
     MPW.beiEreignis("verbunden", zustandAbgleichen);
 
@@ -127,6 +131,7 @@
   function laeuftSetzen(laeuft) {
     MPW.formular.sperren(laeuft);
     MPW.webseite.sperren(laeuft);
+    MPW.premium.sperren(laeuft);
     MPW.aktualisierung.auftragszustand(laeuft);
   }
 
@@ -280,17 +285,21 @@
       window.setTimeout(zustandAbgleichen, 900);
     }
     const istWebseite = nachricht.ergebnis?.art === "webseite" || laufendeArt === "webseite";
+    const istPremium = nachricht.ergebnis?.art === "premium" || laufendeArt === "premium";
     if (["fertig", "fehler", "abgebrochen"].includes(nachricht.aktion)) laufendeArt = "";
     if (nachricht.aktion === "fertig") {
       const titel = nachricht.ergebnis?.titel || "Video";
       zeile("Fertig: " + titel, "erfolg");
       if (istWebseite) MPW.webseite.zeile("Fertig: " + titel, "erfolg");
+      if (istPremium) MPW.premium.zeile("Fertig: " + titel + " — beide Fassungen liegen " +
+                                        "unten in der Übersicht.", "erfolg");
       MPW.melden("Video fertig — es steht unten in der Übersicht.", "erfolg", 7000);
     } else if (nachricht.aktion === "fehler") {
       const meldung = nachricht.fehler?.meldung || "Fehlgeschlagen.";
       const hinweis = nachricht.fehler?.hinweis || "";
       zeile(meldung + (hinweis ? " " + hinweis : ""), "fehler");
       if (istWebseite) MPW.webseite.zeile(meldung + (hinweis ? " " + hinweis : ""), "fehler");
+      if (istPremium) MPW.premium.zeile(meldung + (hinweis ? " " + hinweis : ""), "fehler");
       MPW.melden(meldung, "fehler", 11000);
     } else if (nachricht.aktion === "abgebrochen") {
       zeile("Abgebrochen.");

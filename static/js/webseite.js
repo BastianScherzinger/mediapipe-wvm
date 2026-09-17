@@ -66,7 +66,12 @@
   /* ── Bereich wechseln ──────────────────────────────────────────────────── */
 
   function zeigen(seite, stumm) {
-    if (!["studio", "webseite"].includes(seite)) seite = "studio";
+    // Welche Seiten es gibt, sagt die Seite selbst — nicht eine Liste hier. Beim
+    // Einbau des Premium-Bereichs stand hier eine feste Aufzählung: Der Knopf leuchtete
+    // auf, und der Inhalt blieb der alte. Ein dritter Bereich darf nur an einer Stelle
+    // eingetragen werden müssen, und das ist das HTML.
+    const bekannt = $$("[data-seite-inhalt]").map((k) => k.dataset.seiteInhalt);
+    if (!bekannt.includes(seite)) seite = "studio";
     for (const inhalt of $$("[data-seite-inhalt]")) {
       inhalt.hidden = inhalt.dataset.seiteInhalt !== seite;
     }
@@ -78,7 +83,7 @@
     }
     MPW.speicher.schreiben("seite", seite);
     try {
-      window.history.replaceState(null, "", seite === "webseite" ? "#webseite" : "#");
+      window.history.replaceState(null, "", seite === "studio" ? "#" : "#" + seite);
     } catch (fehler) { /* im Desktop-Fenster ohne Bedeutung */ }
     if (!stumm && seite === "webseite" && !$("#web-url").value) $("#web-url").focus();
   }

@@ -237,6 +237,68 @@ Dasselbe liegt als `posting.txt` im Videoordner.
 
 ---
 
+## Premium-Film — wenn das Video etwas wert sein soll
+
+Der dritte Bereich in der Kopfzeile. Er macht etwas grundlegend anderes als die beiden
+anderen: Hier entsteht kein KI-Clip und keine Bildschirmaufnahme mit Textbannern,
+sondern ein **gebauter Marken-Film** — Typografie, Bewegung, Musik im Takt, Logo am
+Ende. Claude schreibt dafür erst den Auftrag und baut ihn dann selbst, Schritt für
+Schritt, wie ein Motion-Designer am Rechner.
+
+Jeder Auftrag liefert **zwei Fassungen**: 16:9 für Web und Präsentation, 9:16 für
+TikTok, Reels und WhatsApp. Nicht beschnitten, sondern zweimal gebaut.
+
+### Die drei Fragen am Anfang
+
+| Worüber? | Wann nehmen | Was das Programm tut |
+|---|---|---|
+| **Webseite (Link)** | Die Seite gehört jemand anderem, Sie haben keinen Quelltext | Fotografiert die Seite und liest ihre Texte |
+| **Projektordner** | Die Seite liegt auf diesem Rechner | Liest die echten Texte, Preise, Farben, Schriften und Bilder — das ergibt die besten Filme |
+| **Thema oder Produkt** | Es gibt gar keine Seite | Nimmt Ihre Beschreibung und das hochgeladene Material |
+
+Dazu kommen Kunde, Zielgruppe, Tonalität, Länge und — unter „Feinheiten“ — Botschaft,
+Handlungsaufforderung, Kontaktzeile und ein freier Wunsch an Claude.
+
+**Material** können Sie immer dazulegen: einzelne Bilder („Bilder wählen“) oder einen
+ganzen Ordner („Ordner hochladen“). Logo, Produktfotos, Hausschrift — alles, was im
+Video vorkommen soll.
+
+### Was nach dem Klick passiert
+
+1. **Material** — Aufnahmen der Seite, Ihr Projektordner, Ihre Uploads.
+2. **Auftrag** — Claude schreibt daraus einen ausführlichen Auftrag mit Storyboard.
+   Er erscheint aufklappbar im Fenster, bevor gebaut wird.
+3. **Bauen** — Claude baut beide Kompositionen und prüft sie selbst.
+4. **Rendern** — beide Fassungen werden gerendert.
+5. **Ausgabe** — Film, Hochformat, Vorschaubild und Posting-Text landen in der Übersicht.
+
+Ein Film dauert **8 bis 25 Minuten**. Das Fenster kann offen bleiben; unten links
+läuft mit, woran Claude gerade arbeitet.
+
+### Was das kostet
+
+Auf jeder Kachel steht, was der Film an Sprachmodell verbraucht hat — Tokens und der
+Listenpreis in Dollar. Wer über sein Claude-Abo arbeitet, zahlt diesen Betrag nicht
+zusätzlich; die Zahl sagt, wie viel Kontingent ein Film kostet. Sie ist die Grundlage
+dafür, ein solches Video seriös zu bepreisen.
+
+Das Modell lässt sich je Auftrag wählen: **Opus** liefert die beste Gestaltung,
+**Sonnet** ist deutlich günstiger und oft gut genug.
+
+### Voraussetzungen
+
+Zusätzlich zu Python und Git:
+
+* **Node.js 22 oder neuer** ([nodejs.org](https://nodejs.org/)) — die Laufzeit, in der
+  der Film gerendert wird.
+* Eine angemeldete **Claude-CLI** (`claude login`) oder ein Token in der `.env`.
+
+Alles Weitere — der `/brag`-Skill und die Hyperframes-Werkzeuge — holt sich das
+Programm beim ersten Premium-Film selbst. Unter den Fragen steht in einer Zeile, ob
+alles bereit ist.
+
+---
+
 ## Wo die Videos liegen
 
 Im Ordner `output`, ein Unterordner je Video:
@@ -250,6 +312,17 @@ output/2026-08-03_werbung_baeckerei_a1b2c3/
 ├── szene_01_start.jpg  ← die Startbilder
 ├── posting.txt         ← Titel, Text und Hashtags zum Veröffentlichen
 └── auftrag.json        ← Briefing und Drehbuch zum Nachlesen
+```
+
+Ein Premium-Film legt zusätzlich ab:
+
+```
+├── film_hoch.mp4       ← die TikTok-Fassung, eigens gebaut
+├── master-prompt.md    ← der Auftrag, den Claude geschrieben hat
+├── plan.md             ← Storyboard mit Sekunden
+├── posting-vorschlag.txt
+└── arbeit/             ← der Arbeitsordner von Claude (Kompositionen, Aufnahmen,
+                          Material) — zum Nachschauen und für „Erneut versuchen“
 ```
 
 Über das Ordnersymbol auf jeder Kachel springen Sie direkt dorthin.

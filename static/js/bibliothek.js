@@ -99,6 +99,7 @@
       el("div", { klasse: "karte-inhalt" }, [
         el("h3", { klasse: "karte-titel", text: video.titel, title: video.briefing || "" }),
         el("p", { klasse: "karte-angaben", text: angaben }),
+        aufwandZeile(video),
         el("div", { klasse: "karte-formate" }, formatMarken(video)),
       ]),
       el("div", { klasse: "karte-fuss" }, [
@@ -115,6 +116,26 @@
       klasse: "knopf knopf-mini", type: "button", title: titel,
       "aria-label": titel, onclick: beiKlick,
     }, [icon(name)]);
+  }
+
+  /** Was ein Video an Sprachmodell gekostet hat.
+   *
+   * Sie steht nur bei Videos, die Claude selbst gebaut hat (Premium-Film) — nur dort
+   * gibt es überhaupt einen Verbrauch. Der Betrag ist der Listenpreis der API; wer über
+   * ein Abo arbeitet, zahlt ihn nicht zusätzlich, sondern sieht daran, was der Lauf
+   * an Kontingent gekostet hat. Genau diese Zahl braucht man, um ein Video zu bepreisen.
+   */
+  function aufwandZeile(video) {
+    const aufwand = video.aufwand || {};
+    if (!aufwand.tokens_gesamt) return null;
+    const tokens = Number(aufwand.tokens_gesamt).toLocaleString("de-DE");
+    const kosten = Number(aufwand.kosten_usd || 0).toFixed(2).replace(".", ",");
+    const minuten = Math.round((aufwand.dauer || 0) / 60);
+    return el("p", {
+      klasse: "karte-aufwand",
+      title: `Modell ${aufwand.modell || "?"} · ${aufwand.schritte || 0} Arbeitsschritte` +
+             (minuten ? ` · ${minuten} Minuten Bauzeit` : ""),
+    }, [icon("tokens"), ` ${tokens} Tokens · ${kosten} $`]);
   }
 
   function formatMarken(video) {

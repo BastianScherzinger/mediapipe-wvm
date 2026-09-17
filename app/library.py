@@ -210,6 +210,11 @@ def eintrag(ordner: "str | Path") -> dict | None:
                      for k, v in media.FORMATE.items() if k not in fassungen
                      and k != "poster"],
         "in_arbeit": ordner.name in _in_arbeit,
+        # Woher das Video stammt („video“, „webseite“, „premium“) und was es an
+        # Sprachmodell gekostet hat. Beides steht nur im Begleitzettel neuerer Videos;
+        # ältere zeigen die Angaben schlicht nicht.
+        "art": zettel.get("art") or "video",
+        "aufwand": zettel.get("aufwand") or {},
     }
 
 

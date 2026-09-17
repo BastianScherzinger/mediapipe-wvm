@@ -21,9 +21,9 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from . import (config, errors, higgsfield, higgsfield_mcp, jobstore, library, llm,
-               logbook, media, pipeline, topics, updater, videoquelle, webaufnahme,
-               webwerbung)
+from . import (bragagent, bragstudio, config, errors, higgsfield, higgsfield_mcp,
+               jobstore, library, llm, logbook, media, pipeline, topics, updater,
+               videoquelle, webaufnahme, webwerbung)
 
 QUELLE = "Server"
 
@@ -34,8 +34,11 @@ def anwendung_bauen() -> Flask:
                 template_folder=str(config.TEMPLATE_DIR),
                 static_url_path="/static")
     app.config["JSON_AS_ASCII"] = False
-    # Videos können groß werden; die Oberfläche schickt trotzdem nur kleine Anfragen.
-    app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
+    # Die Oberfläche schickt normalerweise nur kleine Anfragen. Die eine Ausnahme ist
+    # das Hochladen von Bildmaterial für einen Premium-Film — dafür ist die Grenze
+    # gesetzt. Sie gilt technisch für alle Routen; die Upload-Route prüft zusätzlich
+    # selbst, was sie annimmt.
+    app.config["MAX_CONTENT_LENGTH"] = bragstudio.MAX_UPLOAD_BYTES
 
     # ── Antworthilfen ────────────────────────────────────────────────────────
 
@@ -156,6 +159,7 @@ def anwendung_bauen() -> Flask:
             "videoweg": videoquelle.aktiver_weg(),
             "videoweg_name": videoquelle.name_des_aktiven(),
             "webseite": webwerbung.katalog(),
+            "premium": bragstudio.katalog(),
         })
 
     @app.get("/api/zustand")
@@ -262,6 +266,45 @@ def anwendung_bauen() -> Flask:
         return gut({"webseite": {k: pruefung.get(k) for k in (
             "url", "host", "titel", "beschreibung", "bild", "favicon", "marke",
             "dauer_ms", "status")}})
+
+    # ── Premium-Film ─────────────────────────────────────────────────────────
+
+    @app.get("/api/premium/befund")
+    def premium_befund():
+        """Ist alles da, was ein Premium-Film braucht? Für die Lampe in der Oberfläche."""
+        return gut({"befund": bragagent.befund()})
+
+    @app.post("/api/premium/material")
+    def premium_material():
+        """Nimmt hochgeladene Bilder, Logos oder ganze Ordner entgegen.
+
+        Die Dateien landen in einem Korb unter `data/material/<korb>`; der Auftrag holt
+        sie sich beim Start ab und leert ihn. Ein Korb, der nie abgeholt wird, ist eine
+        Handvoll Bilder — er wird beim nächsten Programmstart mit aufgeräumt.
+        """
+        korb = request.form.get("korb") or ""
+        dateien = request.files.getlist("dateien")
+        ergebnis = bragstudio.material_annehmen(korb, dateien)
+        return gut(ergebnis)
+
+    @app.delete("/api/premium/material/<korb>")
+    def premium_material_leeren(korb: str):
+        return gut({"geleert": bragstudio.korb_leeren(korb)})
+
+    @app.post("/api/premium/ordner")
+    def premium_ordner():
+        """Öffnet den Ordner-Auswahldialog des Systems.
+
+        Ein Browser darf den Pfad eines Ordners nicht verraten — er kennt nur die
+        Dateien darin. Das Programm läuft aber auf demselben Rechner, also fragt es das
+        System selbst. Für den Kunden ist es der gewohnte Dialog, kein Pfad zum Tippen.
+        """
+        return gut({"ordner": bragstudio.ordner_waehlen()})
+
+    @app.post("/api/premium/ordner/pruefen")
+    def premium_ordner_pruefen():
+        daten = request.get_json(silent=True) or {}
+        return gut({"ordner": bragstudio.ordner_pruefen(str(daten.get("ordner") or ""))})
 
     # ── Aufträge ─────────────────────────────────────────────────────────────
 

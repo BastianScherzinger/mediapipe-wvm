@@ -87,6 +87,28 @@ def _ist_ip(host: str) -> bool:
         return False
 
 
+#: NAT64 — ein IPv6-Netz, in dem eine IPv4-Adresse steckt (RFC 6052). In Mobilfunk-
+#: und manchen Anschlussnetzen liefert der Namensdienst nur noch solche Adressen.
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _entpackt(ip):
+    """Holt die IPv4-Adresse heraus, wenn sie in einer IPv6-Adresse steckt.
+
+    Ohne das galt eine ganz gewöhnliche Webseite auf diesem Anschluss als „nicht
+    öffentlich": Der Namensdienst liefert hier `64:ff9b::452e:2e73`, und Python führt
+    dieses Netz als *reserviert*. Geprüft werden muss aber die Adresse, die wirklich
+    angesprochen wird — die IPv4 darin (hier 69.46.46.115, öffentlich).
+    """
+    if getattr(ip, "ipv4_mapped", None):
+        return ip.ipv4_mapped
+    if getattr(ip, "sixtofour", None):
+        return ip.sixtofour
+    if ip.version == 6 and ip in _NAT64:
+        return ipaddress.ip_address(int(ip) & 0xFFFFFFFF)
+    return ip
+
+
 def _oeffentlich(host: str) -> bool:
     """Zeigt der Name ausschließlich auf öffentliche Adressen?"""
     if host in ("localhost",) or host.endswith((".local", ".localhost", ".internal")):
@@ -100,6 +122,7 @@ def _oeffentlich(host: str) -> bool:
             ip = ipaddress.ip_address(adresse.split("%")[0])
         except ValueError:
             continue
+        ip = _entpackt(ip)
         if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
                 or ip.is_multicast or ip.is_unspecified):
             return False

@@ -104,6 +104,29 @@ VIDEO_CHAIN: tuple[str, ...] = _chain("MPW_VIDEO_CHAIN", "platform,demo",
                                       ("platform", "abo", "demo"))
 
 CLAUDE_CLI_MODEL: str = _str("MPW_CLAUDE_CLI_MODEL", "sonnet")
+
+# ── Premium-Film (Claude baut die Komposition selbst) ────────────────────────
+# Hier steht bewusst das stärkste Modell: Der Agent entwirft Layout, Typografie und
+# Timing eines Films, der verkauft werden soll. Ein schwächeres Modell spart ein paar
+# Euro und kostet eine Nachbesserungsrunde — beim Preis eines solchen Videos ist das
+# die falsche Ersparnis. Umstellbar über die .env und je Auftrag in der Oberfläche.
+BRAG_MODEL: str = _str("MPW_BRAG_MODEL", "claude-opus-5")
+#: Modelle, die in der Oberfläche zur Wahl stehen.
+BRAG_MODELLE: tuple[tuple[str, str], ...] = (
+    ("claude-opus-5", "Opus 5 — beste Qualität"),
+    ("claude-sonnet-5", "Sonnet 5 — günstiger, schneller"),
+)
+#: Harte Grenze für einen Agentenlauf. Auf einem flotten Rechner ist ein Film nach
+#: 10–20 Minuten fertig; auf diesem Notebook (Intel-Grafik) brauchte der erste Lauf für
+#: zwei Formate, Prüfläufe und zwei Renderdurchgänge über 40 Minuten. Die Grenze ist
+#: deshalb großzügig — sie soll Hängengebliebenes abfangen, nicht ehrliche Arbeit.
+BRAG_ZEITLIMIT: int = _int("MPW_BRAG_ZEITLIMIT", 5400, 600, 14400)
+#: Wie lange auf die Aufnahmen einer fremden Webseite gewartet wird. Danach
+#: entsteht der Film aus den Texten der Seite — Stillstand ist die schlechtere
+#: Antwort als ein Film ohne Bildschirmfotos.
+BRAG_AUFNAHME_GRENZE: int = _int("MPW_BRAG_AUFNAHME_GRENZE", 420, 60, 3600)
+#: Fassung von Hyperframes, gegen die gebaut und geprüft wurde.
+HYPERFRAMES_VERSION: str = _str("MPW_HYPERFRAMES_VERSION", "0.8.46")
 CLAUDE_API_MODEL: str = _str("MPW_CLAUDE_API_MODEL", "claude-sonnet-4-5-20250929")
 LOCAL_MODEL: str = _str("MPW_LOCAL_MODEL", "qwen2.5:7b")
 OLLAMA_URL: str = _str("MPW_OLLAMA_URL", "http://localhost:11434").rstrip("/")

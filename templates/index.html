@@ -33,6 +33,8 @@
     <g id="i-link"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></g>
     <g id="i-handy"><rect x="7" y="3" width="10" height="18" rx="2.2"/><path d="M11 18h2"/></g>
     <g id="i-reihe"><path d="M5 7h14M5 12h14M5 17h9"/></g>
+    <g id="i-stern"><path d="m12 4 2.3 5.2 5.7.5-4.3 3.8 1.3 5.5L12 16.1 6.9 19l1.3-5.5-4.3-3.8 5.7-.5L12 4Z"/></g>
+    <g id="i-tokens"><circle cx="9" cy="9" r="5"/><path d="M15.5 5.3a5 5 0 0 1 0 13.4"/><path d="M4 15.5a8 8 0 0 0 13 3.2"/></g>
   </defs>
 </svg>
 
@@ -49,6 +51,9 @@
     </button>
     <button class="seitenwahl-knopf" type="button" data-seite="webseite">
       <svg class="icon" viewBox="0 0 24 24"><use href="#i-handy"/></svg>Webseite → TikTok
+    </button>
+    <button class="seitenwahl-knopf" type="button" data-seite="premium">
+      <svg class="icon" viewBox="0 0 24 24"><use href="#i-stern"/></svg>Premium-Film
     </button>
   </nav>
 
@@ -327,6 +332,192 @@
         <div class="reihe" data-reihe hidden></div>
       </div>
     </div>
+    <!-- ── Seite 3: Premium-Film ─────────────────────────────────────────── -->
+    <div class="glas glas-hoch" id="seite-premium" data-seite-inhalt="premium" hidden>
+      <div class="seitenkopf">
+        <h2>Premium-Film</h2>
+        <p>Beantworten Sie ein paar Fragen, legen Sie Material dazu — Claude schreibt den
+          Auftrag und baut daraus einen Marken-Film. Sie bekommen ihn zweimal:
+          fürs Web (16:9) und für TikTok, Reels und WhatsApp (9:16).</p>
+      </div>
+
+      <div class="rollbereich">
+        <!-- Frage 1: Worüber? Sie entscheidet, welche Felder danach kommen. -->
+        <fieldset class="feldgruppe">
+          <legend>Worüber soll das Video sein?</legend>
+          <div class="stile" id="pr-quellen" role="radiogroup" aria-label="Quelle"></div>
+        </fieldset>
+
+        <!-- Quelle: Webseite -->
+        <div id="pr-feld-webseite" hidden>
+          <fieldset class="feldgruppe">
+            <legend><label for="pr-url">Link zur Webseite</label></legend>
+            <form class="link-zeile" id="pr-form" autocomplete="off">
+              <span class="link-symbol" aria-hidden="true">
+                <svg class="icon" viewBox="0 0 24 24"><use href="#i-link"/></svg>
+              </span>
+              <input type="text" id="pr-url" class="eingabe eingabe-link"
+                     placeholder="kundenseite.de" inputmode="url" spellcheck="false">
+              <button class="knopf" id="btn-pr-pruefen" type="submit">Prüfen</button>
+            </form>
+            <p class="hinweis">Für Seiten, die Ihnen nicht gehören oder von denen Sie
+              keinen Quelltext haben.</p>
+          </fieldset>
+          <div class="webkarte" id="pr-karte" hidden aria-live="polite"></div>
+        </div>
+
+        <!-- Quelle: Projektordner -->
+        <div id="pr-feld-ordner" hidden>
+          <fieldset class="feldgruppe">
+            <legend><label for="pr-ordner">Projektordner auf diesem Rechner</label></legend>
+            <div class="link-zeile">
+              <span class="link-symbol" aria-hidden="true">
+                <svg class="icon" viewBox="0 0 24 24"><use href="#i-ordner"/></svg>
+              </span>
+              <input type="text" id="pr-ordner" class="eingabe eingabe-link"
+                     placeholder="C:\Users\…\Desktop\meinprojekt" spellcheck="false">
+              <button class="knopf" id="btn-pr-ordner" type="button">Ordner wählen</button>
+            </div>
+            <p class="hinweis" id="pr-ordner-hinweis">Claude liest daraus die echten
+              Texte, Preise, Farben, Schriften und Bilder — das ergibt die besten Filme.</p>
+          </fieldset>
+        </div>
+
+        <!-- Quelle: Thema -->
+        <div id="pr-feld-thema" hidden>
+          <fieldset class="feldgruppe">
+            <legend><label for="pr-thema">Worum geht es?</label></legend>
+            <textarea id="pr-thema" class="eingabe eingabe-flaeche" rows="4" maxlength="600"
+              placeholder="z. B. Neue Winterkollektion aus handbemalter Second-Hand-Mode, Einzelstücke, Versand in 2 Tagen."></textarea>
+            <p class="hinweis">Zwei bis drei Sätze genügen. Was Sie an Bildern haben,
+              laden Sie unten dazu.</p>
+          </fieldset>
+        </div>
+
+        <!-- Material -->
+        <fieldset class="feldgruppe">
+          <legend>Material <em>optional</em></legend>
+          <div class="material-knoepfe">
+            <button class="knopf knopf-leise" id="btn-pr-bilder" type="button">
+              <svg class="icon" viewBox="0 0 24 24"><use href="#i-bild"/></svg>Bilder wählen
+            </button>
+            <button class="knopf knopf-leise" id="btn-pr-ordner-hoch" type="button">
+              <svg class="icon" viewBox="0 0 24 24"><use href="#i-ordner"/></svg>Ordner hochladen
+            </button>
+            <button class="knopf knopf-mini" id="btn-pr-material-weg" type="button" hidden
+                    title="Material verwerfen">
+              <svg class="icon" viewBox="0 0 24 24"><use href="#i-muell"/></svg>
+            </button>
+          </div>
+          <input type="file" id="pr-dateien" multiple hidden
+                 accept="image/*,video/*,.pdf,.txt,.md,.json,.woff2,.otf,.ttf">
+          <input type="file" id="pr-ordnerdateien" webkitdirectory directory multiple hidden>
+          <p class="hinweis" id="pr-material-hinweis">Logo, Produktfotos, Schriften —
+            alles, was im Video vorkommen soll.</p>
+          <div class="material-liste" id="pr-material" hidden></div>
+        </fieldset>
+
+        <!-- Gemeinsame Fragen -->
+        <div class="zweispaltig">
+          <fieldset class="feldgruppe">
+            <legend><label for="pr-kunde">Kunde oder Marke</label></legend>
+            <input type="text" id="pr-kunde" class="eingabe" maxlength="80"
+                   placeholder="z. B. Luviq Universe">
+          </fieldset>
+          <fieldset class="feldgruppe">
+            <legend><label for="pr-zielgruppe">Zielgruppe <em>optional</em></label></legend>
+            <input type="text" id="pr-zielgruppe" class="eingabe" maxlength="200"
+                   placeholder="z. B. Frauen 20–35, Vintage-Mode">
+          </fieldset>
+        </div>
+
+        <fieldset class="feldgruppe">
+          <legend>Tonalität</legend>
+          <div class="stile" id="pr-tonfaelle" role="radiogroup" aria-label="Tonalität"></div>
+        </fieldset>
+
+        <div class="zweispaltig">
+          <fieldset class="feldgruppe">
+            <legend>Länge</legend>
+            <div class="segment segment-drei" id="pr-dauer" role="radiogroup"
+                 aria-label="Länge"></div>
+          </fieldset>
+          <fieldset class="feldgruppe">
+            <legend><label for="pr-modell">Modell</label></legend>
+            <select id="pr-modell" class="eingabe"></select>
+          </fieldset>
+        </div>
+
+        <details class="mehr aufklapper">
+          <summary>Feinheiten</summary>
+          <fieldset class="feldgruppe">
+            <legend><label for="pr-botschaft">Wichtigste Botschaft <em>optional</em></label></legend>
+            <input type="text" id="pr-botschaft" class="eingabe" maxlength="300"
+                   placeholder="z. B. Jedes Teil ist ein Einzelstück">
+          </fieldset>
+          <div class="zweispaltig">
+            <fieldset class="feldgruppe">
+              <legend><label for="pr-cta">Handlungsaufforderung</label></legend>
+              <input type="text" id="pr-cta" class="eingabe" maxlength="60"
+                     placeholder="z. B. Jetzt entdecken">
+            </fieldset>
+            <fieldset class="feldgruppe">
+              <legend><label for="pr-kontakt">Kontaktzeile am Ende</label></legend>
+              <input type="text" id="pr-kontakt" class="eingabe" maxlength="120"
+                     placeholder="z. B. luviq-alsfeld.com">
+            </fieldset>
+          </div>
+          <fieldset class="feldgruppe">
+            <legend><label for="pr-wunsch">Wunsch an Claude</label></legend>
+            <textarea id="pr-wunsch" class="eingabe eingabe-flaeche eingabe-klein" rows="3"
+                      maxlength="600"
+                      placeholder="z. B. Die Preisstaffel zeigen, kein Preis im Bild, Logo am Ende groß"></textarea>
+          </fieldset>
+          <fieldset class="feldgruppe">
+            <legend><label for="pr-sprache">Sprache der Texte im Video</label></legend>
+            <select id="pr-sprache" class="eingabe"></select>
+          </fieldset>
+        </details>
+
+        <fieldset class="feldgruppe feldgruppe-leise">
+          <legend>Was passiert beim Generieren</legend>
+          <ol class="pr-schritte">
+            <li>Material wird eingesammelt (Aufnahmen der Seite, Ihr Ordner, Uploads).</li>
+            <li>Claude schreibt daraus den Auftrag — Sie sehen ihn gleich hier.</li>
+            <li>Claude baut beide Fassungen, prüft sie und rendert.</li>
+          </ol>
+          <p class="hinweis" id="pr-befund"></p>
+        </fieldset>
+
+        <details class="mehr aufklapper" id="pr-prompt-box" hidden>
+          <summary>Der geschriebene Auftrag</summary>
+          <pre class="vorschau pr-prompt" id="pr-prompt"></pre>
+        </details>
+      </div>
+
+      <div class="startleiste">
+        <div class="startknoepfe">
+          <button class="knopf knopf-haupt" id="btn-pr-start" type="button">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-stern"/></svg>
+            <span id="btn-pr-start-text">Video generieren</span>
+          </button>
+          <button class="knopf knopf-abbruch" data-abbruch type="button" hidden
+                  title="Laufenden Auftrag abbrechen">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-stopp"/></svg>
+            <span>Abbrechen</span>
+          </button>
+        </div>
+        <div class="startzeile-reihe">
+          <p class="startzeile" id="pr-zeile">Bereit.</p>
+          <button class="knopf knopf-leise knopf-wiederholen" data-wiederholen type="button"
+                  hidden
+                  title="Der angefangene Stand im Auftragsordner wird übernommen.">
+            <svg class="icon" viewBox="0 0 24 24"><use href="#i-neu"/></svg>Erneut versuchen
+          </button>
+        </div>
+        <div class="reihe" data-reihe hidden></div>
+      </div>
+    </div>
   </section>
 
   <!-- ══ Rechts: Ablauf, Logbuch, Videos ══════════════════════════════════ -->
@@ -397,6 +588,7 @@
 <script src="/static/js/kern.js"></script>
 <script src="/static/js/formular.js"></script>
 <script src="/static/js/webseite.js"></script>
+<script src="/static/js/premium.js"></script>
 <script src="/static/js/ablauf.js"></script>
 <script src="/static/js/logbuch.js"></script>
 <script src="/static/js/bibliothek.js"></script>

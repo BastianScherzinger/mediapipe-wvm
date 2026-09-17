@@ -1440,3 +1440,55 @@ legend em, summary em {
   }
   .punkt.wandert { opacity: 1; transform: translateX(22px); }
 }
+
+/* ── 12  Premium-Film ────────────────────────────────────────────────────────
+ *
+ * Der Bereich benutzt dieselben Bausteine wie die übrigen Seiten (.stil, .segment,
+ * .feldgruppe). Neu ist nur, was es vorher nicht gab: die Materialliste, die
+ * Schrittfolge und der angezeigte Auftrag. Die Auswahlkacheln bekommen hier die
+ * Akzentfarbe, weil sie — anders als bei den Werbestilen — keine eigene Farbe haben.
+ */
+#pr-quellen .stil, #pr-tonfaelle .stil { --stilfarbe: var(--akzent); }
+#pr-tonfaelle { grid-template-columns: repeat(2, 1fr); }
+
+.material-knoepfe { display: flex; gap: var(--a2); flex-wrap: wrap; align-items: center; }
+.material-liste {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: var(--a2);
+  max-height: 96px; overflow: auto;
+}
+.material-marke {
+  font-size: 11px; color: var(--text-2);
+  padding: 3px 8px;
+  background: rgba(0,0,0,.25);
+  border: 1px solid var(--rand);
+  border-radius: 99px;
+  white-space: nowrap; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis;
+}
+
+.pr-schritte {
+  margin: 0; padding-left: 18px;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11.5px; line-height: 1.45; color: var(--text-2);
+}
+.pr-prompt {
+  max-height: 260px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word;
+  font-size: 11px; line-height: 1.5;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+/* Der Hinweis unter den Schritten trägt den Betriebszustand — grün heißt: es kann
+   losgehen, gelb: es fehlt etwas, das beim ersten Lauf geholt wird. */
+.hinweis[data-art="gut"] { color: var(--erfolg); }
+.hinweis[data-art="warnung"] { color: var(--warnung); }
+
+/* Verbrauch je Video in der Übersicht. Tabellenziffern, damit die Zahlen zweier
+   Kacheln untereinander vergleichbar stehen. */
+.karte-aufwand {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.karte-aufwand .icon { width: 13px; height: 13px; opacity: .8; }

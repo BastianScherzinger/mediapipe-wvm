@@ -20,9 +20,10 @@
   const SYMBOLE = {
     briefing: "briefing", claude: "claude", bild: "bild", video: "film", ausgabe: "ausgabe",
     pruefen: "link", aufnahme: "handy", konzept: "claude", schnitt: "film",
+    material: "ordner", prompt: "claude", bauen: "stern", render: "film",
   };
 
-  const saetze = { video: [], webseite: [] };
+  const saetze = { video: [], webseite: [], premium: [] };
   let bloecke = [];
   const knoten = new Map();          // Blockkennung → Elemente
   let restUhr = null;
@@ -32,16 +33,18 @@
 
   /* ── Aufbau ────────────────────────────────────────────────────────────── */
 
-  function aufbauen(liste, webseitenListe) {
+  function aufbauen(liste, webseitenListe, premiumListe) {
     saetze.video = liste || [];
     saetze.webseite = webseitenListe || [];
+    saetze.premium = premiumListe || [];
     zeichnen(saetze.video);
     if (!verdrahtet) { verdrahten(); verdrahtet = true; }
   }
 
   /** Stellt den Blocksatz passend zum Auftrag ein — nur, wenn er sich ändert. */
   function fuerAuftrag(auftrag) {
-    const art = auftrag?.einstellungen?.art === "webseite" ? "webseite" : "video";
+    const gemeldet = auftrag?.einstellungen?.art;
+    const art = saetze[gemeldet]?.length ? gemeldet : "video";
     const liste = saetze[art].length ? saetze[art] : saetze.video;
     if (liste.map((b) => b.kennung).join() !== bloecke.map((b) => b.kennung).join()) {
       zeichnen(liste);
