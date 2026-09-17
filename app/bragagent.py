@@ -20,11 +20,26 @@ Drei Dinge regelt dieses Modul, und nichts sonst:
    weitergereicht und landet beim Video — die Frage „was hat das gekostet?“ soll nicht
    geschätzt werden müssen.
 
-**Zur Freigabe der Werkzeuge:** Der Lauf läuft mit `--permission-mode bypassPermissions`,
-weil ein nicht-interaktiver Lauf sonst an der ersten Rückfrage stehen bliebe. Begrenzt
-wird er über das Arbeitsverzeichnis: Claude bekommt einen eigenen Auftragsordner unter
-`output/` und arbeitet darin. Netzsuche und Netzabruf sind abgeschaltet — gebraucht wird
-beides nicht, und beides wäre eine Einladung, sich zu verlaufen.
+**Zur Freigabe der Werkzeuge — bewusst so, mit offenen Karten:** Der Lauf läuft mit
+`--permission-mode bypassPermissions`. Ein nicht-interaktiver Lauf bliebe sonst an der
+ersten Rückfrage stehen, und ohne die Shell gäbe es kein Video: `npx hyperframes check`
+und `npx hyperframes render` sind der Kern der Arbeit. Das heißt aber auch: **Während
+eines Laufs kann Claude auf diesem Rechner Befehle ausführen.** Wer das nicht will, darf
+den Bereich nicht benutzen.
+
+Eingegrenzt wird, was sich sinnvoll eingrenzen lässt:
+
+* **Arbeitsverzeichnis** — der Auftragsordner unter `output/`; nur er ist über
+  `--add-dir` freigegeben, und der Auftragstext sagt ausdrücklich, dass nichts
+  außerhalb geändert wird.
+* **Netzsuche und Netzabruf** sind abgeschaltet (`WebSearch`, `WebFetch`).
+* **Fremde Zugangsdaten sieht der Lauf nicht** (`_ohne_geheimnisse`): Higgsfield-Schlüssel,
+  Zahlungs- und Cloud-Zugänge werden aus der Umgebung entfernt. Übrig bleibt das
+  Claude-Token, mit dem sich die CLI anmeldet.
+
+Eine echte Sandbox (Container, Windows-Sandbox) wäre die saubere Lösung; sie setzt aber
+auf dem Rechner eines Kunden mehr voraus, als hier vorausgesetzt werden darf. Solange es
+sie nicht gibt, ist die Grenze das Arbeitsverzeichnis plus diese Notiz.
 """
 from __future__ import annotations
 
@@ -228,6 +243,25 @@ def _binordner() -> Path:
 
 # ── Der Lauf ─────────────────────────────────────────────────────────────────
 
+#: Was der Agent nicht zu sehen braucht. Er baut einen Film aus Dateien im
+#: Auftragsordner — mit dem Higgsfield-Schlüssel oder einem Zahlungszugang hat das
+#: nichts zu tun. Was ein Prozess nicht kennt, kann er auch nicht versehentlich in eine
+#: Datei, ein Protokoll oder einen Netzaufruf schreiben.
+_GEHEIM = ("HIGGSFIELD", "OPENAI", "AWS_", "GOOGLE_", "GCP_", "AZURE", "STRIPE",
+           "PAYPAL", "SECRET", "PASSWORD", "PASSWD")
+
+
+def _ohne_geheimnisse(umgebung: dict) -> dict:
+    """Räumt fremde Zugangsdaten aus der Umgebung des Agenten.
+
+    Die eine Ausnahme ist `CLAUDE_CODE_OAUTH_TOKEN`: Damit meldet sich die CLI an, es
+    ist der Zugang, den sie benutzen soll. Alles andere fliegt raus.
+    """
+    return {name: wert for name, wert in umgebung.items()
+            if name == "CLAUDE_CODE_OAUTH_TOKEN"
+            or not any(teil in name.upper() for teil in _GEHEIM)}
+
+
 @dataclass
 class Lauf:
     """Was ein Agentenlauf hinterlässt."""
@@ -301,7 +335,7 @@ def lauf(arbeitsordner: Path, prompt: str, *, modell: str = "", zeitlimit: int =
     zeitlimit = zeitlimit or config.BRAG_ZEITLIMIT
 
     from .llm import claude_cli
-    umgebung = claude_cli.umgebung()
+    umgebung = _ohne_geheimnisse(claude_cli.umgebung())
     umgebung["PATH"] = str(_binordner()) + os.pathsep + umgebung.get("PATH", "")
     # Hyperframes schreibt seinen Zwischenspeicher sonst neben das Projekt; im
     # Auftragsordner hat er nichts verloren.
