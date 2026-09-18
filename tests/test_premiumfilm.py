@@ -251,6 +251,31 @@ def test_ereignisstrom_wird_zu_einer_abrechnung():
     assert ("text", "Baue Szene 1") in gemeldet
 
 
+def test_erschoepftes_kontingent_wird_als_solches_gemeldet():
+    """Am 18.09.2026 stand im Dashboard „Claude hat den Filmbau nicht zu Ende gebracht",
+    während die CLI in Wahrheit „monthly spend limit" meldete. Wer das liest, sucht den
+    Fehler im Programm — dabei ist nur das Kontingent alle."""
+    lauf = bragagent.Lauf()
+    with pytest.raises(errors.GuthabenFehler) as fehler:
+        bragagent._satz_verarbeiten(
+            {"type": "result", "is_error": True,
+             "result": "You've hit your monthly spend limit - raise it at "
+                       "claude.ai/settings/usage - your session limit resets 2:30pm "
+                       "(Europe/Berlin)"},
+            lauf, None)
+    assert "Kontingent" in fehler.value.meldung
+    assert "2:30pm" in fehler.value.hinweis
+    assert "claude.ai/settings/usage" in fehler.value.hinweis
+
+
+def test_gewoehnlicher_fehler_bleibt_ein_gewoehnlicher_fehler():
+    lauf = bragagent.Lauf()
+    with pytest.raises(errors.AnbieterFehler):
+        bragagent._satz_verarbeiten(
+            {"type": "result", "is_error": True, "result": "context window exceeded"},
+            lauf, None)
+
+
 def test_fehlschlag_des_agenten_wird_zum_erklaerten_fehler():
     lauf = bragagent.Lauf()
     with pytest.raises(errors.AnbieterFehler):

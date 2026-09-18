@@ -425,6 +425,7 @@ def lauf(arbeitsordner: Path, prompt: str, *, modell: str = "", zeitlimit: int =
 
     if not ergebnis.text and prozess.returncode not in (0, None):
         meldung = config.entschaerfe(" ".join(fehlertext)[-400:])
+        _pruefe_kontingent(meldung)
         if any(wort in meldung.lower() for wort in
                ("login", "unauthorized", "oauth", "401", "expired")):
             raise errors.ZugangFehler(
@@ -440,6 +441,33 @@ def lauf(arbeitsordner: Path, prompt: str, *, modell: str = "", zeitlimit: int =
                            f"{ergebnis.kosten_usd:.2f} $ Listenpreis."
                    .replace(",", "."))
     return ergebnis
+
+
+#: Woran ein erschöpftes Kontingent zu erkennen ist. Die Meldung kommt englisch und
+#: mitten in einem sonst unauffälligen Ergebnis — ohne diese Prüfung stünde im Dashboard
+#: „Claude hat den Filmbau nicht zu Ende gebracht", und niemand wüsste, dass es ums Geld
+#: geht und nicht um einen Fehler.
+_KONTINGENT = ("spend limit", "usage limit", "rate limit", "quota", "limit reached",
+               "out of credit", "insufficient credit", "credit balance")
+
+_RESET = re.compile(r"resets?\s+(?:at\s+)?([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm)?"
+                    r"(?:\s*\([^)]+\))?)", re.IGNORECASE)
+
+
+def _pruefe_kontingent(grund: str) -> None:
+    """Macht aus einer englischen Limit-Meldung einen Satz, der sagt, was zu tun ist."""
+    klein = (grund or "").lower()
+    if not any(wort in klein for wort in _KONTINGENT):
+        return
+    treffer = _RESET.search(grund)
+    wann = f" Das Kontingent wird um {treffer.group(1).strip()} zurückgesetzt." if treffer else ""
+    raise errors.GuthabenFehler(
+        "Das Claude-Kontingent ist aufgebraucht.",
+        f"Der Film lässt sich erst danach zu Ende bauen.{wann} "
+        "Entweder abwarten und den Auftrag dann wiederholen, oder das Ausgabelimit "
+        "unter claude.ai/settings/usage anheben. Der angefangene Stand bleibt im "
+        "Auftragsordner liegen und wird beim Wiederholen weiterverwendet.",
+        ursprung=QUELLE)
 
 
 def _satz_verarbeiten(satz: dict, ergebnis: Lauf, melden) -> None:
@@ -468,7 +496,8 @@ def _satz_verarbeiten(satz: dict, ergebnis: Lauf, melden) -> None:
         ergebnis.kosten_usd = float(satz.get("total_cost_usd") or 0.0)
         ergebnis.tokens = _tokens_aus(satz.get("usage") or {})
         if satz.get("is_error"):
+            grund = config.entschaerfe(str(satz.get("result") or "")[:400])
+            _pruefe_kontingent(grund)
             raise errors.AnbieterFehler(
                 "Claude hat den Filmbau nicht zu Ende gebracht.",
-                config.entschaerfe(str(satz.get("result") or "")[:300]) or
-                "Keine nähere Angabe.", ursprung=QUELLE)
+                grund or "Keine nähere Angabe.", ursprung=QUELLE)

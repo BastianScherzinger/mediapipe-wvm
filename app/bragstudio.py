@@ -582,6 +582,30 @@ Der Bauplan (ABCD), in dieser Reihenfolge:
    und Adresse, dazu die Orte des Einzugsgebiets. Mindestens 4,5 Sekunden Standzeit.
    Sie bewegt sich leicht (2 % Push-in), steht aber nie still.
 
+**Zwei Szenentypen im Wechsel — das ist der Takt des Films:**
+
+* **Bildszene** — das Foto füllt das Bild vollständig (`object-fit: cover`, niemals als
+  Panel mit Rand), dunkler Verlauf über die unteren 45 %, Headline unten links am festen
+  Anker, darunter eine kurze Subline. Chips wie `VORHER` oder der Leistungsname liegen
+  **auf** dem Bild, oben links. Dauer 1,4–2,5 s.
+* **Infoszene** — heller Grund in Markenweiß, Überschrift oben links, darunter entweder
+  die Leistungen als Liste mit Haken oder zwei bis drei große Zahlen mit ihrer Bedeutung.
+  Kein Foto. Dauer 2,5–4 s.
+
+Mindestens **zwei Infoszenen** je Film, im Wechsel mit den Bildszenen. Der Wechsel der
+Fläche (dunkel/hell) gibt dem Film Struktur — nicht der Wechsel des Motivs.
+
+**Ein Gedanke je Szene.** Leistungsname, Zitat und Beweis bekommen jeweils eine eigene
+Szene, nie drei Textblöcke in einem Bild.
+
+**Alle Texte hängen an einem Anker**: dieselbe linke Kante, dieselbe Grundlinie,
+dieselbe Headline-Größe über den ganzen Film. Wichtigeres bekommt mehr Standzeit, nicht
+mehr Punkte.
+
+**Vorher/Nachher ist EINE Szene**: ein formatfüllendes Bild, über das eine Kante läuft
+und das zweite freigibt — nicht zwei Bilder nacheinander. Sonst sieht niemand, dass es
+derselbe Ort ist, und der Beweis ist keiner.
+
 **Der Marken-Bug ist Pflicht:** Logo in einer kleinen Fläche, oben in der sicheren
 Zone, ab Sekunde 0,25 durchgehend bis zur End-Card. Wer nach vier Sekunden wegwischt,
 muss trotzdem wissen, wer geworben hat.
@@ -782,6 +806,13 @@ egal wie weit du bist.
   umgebrochen sein, keines ohne Verlauf auf hellem Bild liegen. Ein solcher Fehler
   macht den Film unverkäuflich — er fällt jedem Kunden sofort auf.
 - Beide MP4 müssen existieren, 15–25 s lang sein und eine Tonspur haben.
+- **Miss den Schnittrhythmus am fertigen MP4**, statt ihn zu schätzen:
+  `ffmpeg -i brag.mp4 -filter:v "select='gt(scene,0.25)',showinfo" -f null - 2>&1 | grep -c pts_time`
+  Unter zehn erkannten Wechseln bei 22–26 Sekunden ist der Film zu träge — dann fehlen
+  harte Schnitte. Bau sie nach: zweite Einstellung je Motiv, Detail und Totale.
+- **Kein Mensch wird freigestellt.** Porträts kommen im Originalbild in einem Rahmen
+  oder Ausschnitt, mit Verlauf eingebettet. Eine ausgefranste Haarkante ist der
+  sichtbarste Amateurfehler, den ein Markenfilm haben kann.
 - Schreibe zum Schluss `brag-output/share-copy.txt` (ein bis drei Sätze zum Posten).
 
 ## Grenzen

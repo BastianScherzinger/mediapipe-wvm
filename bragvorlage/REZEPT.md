@@ -128,6 +128,72 @@ können.**
 - Elemente, die einfach erscheinen (`opacity 0 → 1` ohne Bewegung, ohne Maske).
 - Ein Bild, das im Format nicht aufgeht und mit Balken oder Verzerrung sitzt.
 
+## 4b2. Schnittrhythmus — gemessen, nicht gefühlt
+
+Der zweite Luviq-Film sah gut aus und wirkte trotzdem zäh. Die Messung sagt, warum:
+**In 25 Sekunden lag genau ein erkennbarer Schnitt.** Alles andere waren weiche
+Blenden. Ein Film ohne Schnitte hat keinen Puls — er sieht aus wie eine Präsentation
+mit Überblendung, und genau so fühlt er sich an.
+
+**Zielwerte für 22–26 Sekunden:**
+
+| | Wert |
+|---|---|
+| Bildwechsel insgesamt | **12–18** (alle 1,4–2,1 s) |
+| davon harte Schnitte | **mindestens drei Viertel** |
+| weiche Blenden | höchstens zwei im ganzen Film |
+| längste Einstellung | 3,0 s (Ausnahme: End-Card) |
+| kürzeste Einstellung | 0,5 s — als Akzent, nicht als Regel |
+
+**Wie man Tempo erzeugt, ohne hektisch zu werden:**
+
+1. **Zwei Einstellungen je Motiv.** Erst das Detail (Ausschnitt der Malerei, die Hand,
+   die Kante), dann die Totale — oder umgekehrt. Zwei Schnitte, 0,6–0,9 s auseinander,
+   auf demselben Objekt. Das ist der billigste Weg zu doppeltem Tempo ohne neues Material.
+2. **Der Schnitt liegt auf dem Beat**, nie daneben. Bei 110 BPM alle 0,545 s ein
+   möglicher Schnittpunkt — genommen wird jeder dritte oder vierte.
+3. **Text wechselt zwischen den Bildschnitten**, nicht mit ihnen: Bild schneidet auf
+   Beat 4, Text auf Beat 8. So entstehen doppelt so viele Ereignisse wie Schnitte.
+4. **Die Bewegung läuft über den Schnitt weiter** — dann wirkt ein harter Schnitt nicht
+   abgehackt, sondern treibend.
+
+**Die Prüfung dazu ist eine Zeile und gehört zur Abnahme:**
+
+```bash
+ffmpeg -i brag.mp4 -filter:v "select='gt(scene,0.25)',showinfo" -f null - 2>&1 | grep -c pts_time
+```
+
+Zählt das weniger als zehn bei einem 25-Sekunden-Film, ist der Film zu träge —
+unabhängig davon, wie schön die einzelnen Bilder sind.
+
+## 4b3. Menschen im Bild — die Regel, die ein Video sofort billig macht
+
+Der Luviq-Film zeigte die Inhaberin **freigestellt auf Schwarz**. Um Haare und Schultern
+lag eine ausgefranste, bunt gesprenkelte Kante, unten brach der Körper hart ab. Das ist
+der sichtbarste Amateurfehler überhaupt — und er entsteht ausgerechnet beim Versuch,
+etwas besonders gut zu machen.
+
+**Regel: Menschen werden nicht freigestellt.** Haare lassen sich mit Schwellenwerten,
+Farbdistanz oder einem Weichzeichner nicht sauber ausschneiden; was übrig bleibt, ist
+ein Heiligenschein. Stattdessen:
+
+- **Das Originalfoto in einen Rahmen setzen** — ein Panel, eine halbe Bildseite, ein
+  Kreis mit Markenring. Der Ausschnitt wird mit `object-fit: cover` gesetzt, das Bild
+  bleibt unangetastet.
+- **Mit einem Verlauf einbetten**, wenn es in die Fläche auslaufen soll: eine Maske vom
+  Bildrand in den Grund (`mask-image: linear-gradient(...)`), 15–25 % der Bildbreite.
+  Das ist weich, hat keine Kante und funktioniert bei jedem Motiv.
+- **Gesicht groß genug**: mindestens ein Drittel der Bildhöhe. Ein Mensch, der zu klein
+  im Bild steht, schafft kein Vertrauen — er wirkt wie ein Symbolbild.
+- **Blickrichtung in die freie Fläche**, Text auf die andere Seite. Wer nach rechts
+  schaut, bekommt den Text rechts.
+- **Nie unter der Brust abschneiden** und nie an einem Gelenk. Kopf bis Hüfte oder
+  Kopf bis Brust, mit Luft über dem Kopf.
+
+Dasselbe gilt für alles Organische: Pflanzen, Fell, Rauch, transparente Stoffe.
+**Freigestellte Produkte sind etwas anderes** — wenn der Shop sie bereits vor weißem
+Grund fotografiert hat, ist die Kante sauber, und man darf sie benutzen.
+
 ## 4c. Der Feinschliff, der aus „gut" „verkaufsfähig" macht
 
 Diese sechs Dinge kosten zusammen zwanzig Minuten und heben den Film sichtbar:
@@ -155,6 +221,91 @@ werden sie weich. Plane Fahrten deshalb von groß nach klein (Zoom-out), nicht u
 Der weichste Moment liegt dann am Anfang der Szene, wo noch niemand hinsieht.
 Freistellen nur, wenn die Kante sauber wird — ein sichtbarer Schnitt an Haaren oder
 Stoff ruiniert mehr, als der freigestellte Look bringt.
+
+## 4d. Der Bauplan einer Szene — warum Flügel unruhig wirkte und Rümpelwerk nicht
+
+Beide Filme hatten dasselbe Material-Niveau: echte Objektfotos, ein Gesicht, belegte
+Zusagen. Der eine sah aus wie von einer Agentur, der andere wie zusammengesetzt. Der
+Unterschied lag **nicht** an den Bildern, sondern an vier Regeln, die Rümpelwerk einhält
+und Flügel verletzt hat.
+
+### Regel 1 — Fotos füllen das Bild. Immer.
+
+In Flügel lagen die Vorher/Nachher-Fotos als **Panel in der Mitte**, oben und unten
+dunkler Grund. Ein Querformat-Foto im 9:16-Rahmen, unbeschnitten. Das sieht aus wie eine
+Präsentationsfolie mit eingefügtem Bild — und genau daran erkennt man Amateurarbeit.
+
+```css
+/* richtig: das Foto ist die Szene */
+.szene img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+```
+
+Ein Querformat-Foto im Hochformat wird **beschnitten**, nicht eingepasst. Wenn der
+interessante Teil dabei verloren geht, verschiebt man den Bildausschnitt
+(`object-position`), statt das Bild zu verkleinern. Balken und schwebende Kästen gibt es
+nicht — außer als bewusstes Gestaltungsmittel über den ganzen Film hinweg, nie einmalig.
+
+### Regel 2 — Text hat einen festen Anker, über den ganzen Film
+
+In Flügel saß der Text mal unten links, mal unter dem Bild, mal oben, mal in der Mitte —
+in vier Szenen an vier Stellen. Das Auge muss ihn jedes Mal neu suchen, und der Film
+wirkt zusammengewürfelt.
+
+**Ein Anker je Formatseite, festgeschrieben als Token:**
+
+```css
+:root {
+  --text-x: 90px;          /* linke Kante aller Texte */
+  --text-y: 68%;           /* Grundlinie der Headline, 9:16 */
+  --headline: 74px;        /* eine Größe für alle Headlines */
+  --subline: 30px;         /* eine Größe für alle Sublines */
+}
+```
+
+Jede Headline steht links an `--text-x`, jede Subline 14 px darunter, jede Headline hat
+dieselbe Größe. Was wichtiger ist, bekommt **mehr Standzeit**, nicht mehr Punkte.
+
+### Regel 3 — Ein Gedanke je Szene
+
+Flügel zeigte im Nachher-Bild gleichzeitig: das Foto, das Label „NACHHER", eine
+Google-Rezension und deren Quelle. Vier Dinge, die um dieselbe Sekunde kämpfen.
+
+Eine Szene trägt **eine** Aussage. Das Zitat bekommt eine eigene Szene, der
+Leistungsname eine eigene, der Beweis eine eigene. Wer drei Dinge in vier Sekunden
+sagen will, braucht drei Szenen à 1,4 s — nicht eine mit drei Textblöcken.
+
+### Regel 4 — Der Wechsel hell/dunkel gibt den Takt
+
+Rümpelwerk wechselt: dunkle **Bildszene** (Foto formatfüllend, Text unten) → helle
+**Infoszene** (weißer Grund, Überschrift oben, Liste oder Zahlen mit Akzentfarbe) →
+dunkle Bildszene → helle Infoszene → Gesicht auf Weiß → End-Card in Markenfarbe.
+
+Dieser Wechsel ist der Grund, warum der Film Struktur hat, obwohl er nur fünf harte
+Schnitte enthält: Die **Fläche** wechselt, nicht nur das Motiv.
+
+Flügel war durchgehend dunkelblau. Alles floss ineinander, nichts hatte ein Gewicht.
+
+**Mindestens zwei Infoszenen je Film** — typischerweise „Was wir machen" (Leistungen als
+Liste mit Haken) und „Was wir zusagen" (zwei, drei Zahlen groß, darunter, worauf sie sich
+beziehen).
+
+### Die zwei Szenentypen als Bauplan
+
+| | **Bildszene** | **Infoszene** |
+|---|---|---|
+| Grund | das Foto, formatfüllend | Markenweiß oder heller Markenton |
+| Verlauf | dunkler Verlauf über die unteren 45 % | keiner |
+| Headline | unten links am Anker, weiß | oben links, in Markenschwarz |
+| Zweite Ebene | eine Subline, klein, 80 % Deckkraft | Liste mit Haken oder große Zahlen |
+| Chip | oben links unter dem Marken-Bug (`VORHER`, Leistungsname) | keiner |
+| Dauer | 1,4–2,5 s | 2,5–4,0 s (mehr zu lesen) |
+
+### Vorher/Nachher gehört in **eine** Szene
+
+Nicht zwei Panels nebeneinander oder nacheinander, sondern **ein** formatfüllendes Bild,
+über das eine Kante läuft und das zweite freigibt. Das Vorher steht 1,4 s, dann fährt die
+Kante in 1,0–1,2 s durch. Der Chip wechselt dabei von `VORHER` auf `NACHHER`. Nur so
+sieht man, dass es derselbe Ort ist — und genau das ist der Beweis, um den es geht.
 
 ## 5. Ton
 
