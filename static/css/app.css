@@ -1449,7 +1449,7 @@ legend em, summary em {
  * Akzentfarbe, weil sie — anders als bei den Werbestilen — keine eigene Farbe haben.
  */
 #pr-quellen .stil, #pr-tonfaelle .stil, #pr-fokus .stil { --stilfarbe: var(--akzent); }
-#pr-tonfaelle { grid-template-columns: repeat(2, 1fr); }
+#pr-tonfaelle, #pr-fokus { grid-template-columns: repeat(2, 1fr); }
 
 .material-knoepfe { display: flex; gap: var(--a2); flex-wrap: wrap; align-items: center; }
 .material-liste {

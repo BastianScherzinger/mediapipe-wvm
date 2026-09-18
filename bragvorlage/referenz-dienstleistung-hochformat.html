@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="de" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>Rümpelwerk Mitteldeutschland — Werbevideo 9:16</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      /* ═══════════════════════════════════════════════════════════════════
+         Werbevideo Rümpelwerk Mitteldeutschland · 1080×1920 · 26 s
+         Aufbau nach Googles ABCD (Attention · Branding · Connection ·
+         Direction). Jede Zahl im Bild hat eine Quelle im Website-Repository.
+         ═══════════════════════════════════════════════════════════════════ */
+
+      /* ── Marken-Schriften, lokal aus static/fonts/ des Projekts ────────── */
+      @font-face {
+        font-family: 'Montserrat';
+        font-style: normal; font-weight: 400 900; font-display: block;
+        src: url('assets/fonts/montserrat-latin.woff2') format('woff2');
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+          U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+          U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: 'Montserrat';
+        font-style: normal; font-weight: 400 900; font-display: block;
+        src: url('assets/fonts/montserrat-latin-ext.woff2') format('woff2');
+        unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+          U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+          U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+      }
+      @font-face {
+        font-family: 'Open Sans';
+        font-style: normal; font-weight: 400 600; font-stretch: 100%;
+        font-display: block;
+        src: url('assets/fonts/opensans-latin.woff2') format('woff2');
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+          U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+          U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+      }
+      @font-face {
+        font-family: 'Open Sans';
+        font-style: normal; font-weight: 400 600; font-stretch: 100%;
+        font-display: block;
+        src: url('assets/fonts/opensans-latin-ext.woff2') format('woff2');
+        unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7,
+          U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+          U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+      }
+
+      :root {
+        /* Marken-Tokens 1:1 aus static/css/ruempelwerk.css */
+        --gruen: #157a39;        /* --rw-orange (historischer Name, ist Grün) */
+        --gruen-hell: #22c55e;   /* --rw-orange-2, reine Dekorfarbe */
+        --gruen-tief: #0f3d24;   /* --rw-green-900 */
+        --text: #0f172a;
+        --text-2: #475569;
+        --bg: #ffffff;
+        --bg-2: #eef3f0;
+
+        /* Sichere Zone 9:16. Rechts mehr, weil dort bei TikTok und Reels die
+           Aktionsleiste liegt; unten wegen Bildunterschrift und Audio-Bar. */
+        --sa-l: 90px;
+        --sa-r: 200px;
+        --sa-t: 250px;
+        --sa-w: 790px;           /* 1080 − sa-l − sa-r */
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 1080px; height: 1920px; overflow: hidden; background: #000;
+      }
+      #root {
+        position: relative; width: 100%; height: 100%; overflow: hidden;
+        font-family: 'Open Sans', system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .clip { position: absolute; inset: 0; overflow: hidden; }
+      .foto {
+        position: absolute; inset: 0; width: 1080px; height: 1920px;
+        object-fit: cover; will-change: transform;
+      }
+
+      /* ══ Marken-Bug — von Sekunde 0 bis zur End-Card sichtbar ═══════════
+         ABCD/Branding: „Show up early and throughout." Wer an beliebiger
+         Stelle einsteigt, sieht in einem Blick, wer hier wirbt. */
+      #bug {
+        position: absolute;
+        inset: auto;                       /* .clip setzt inset:0 - zuruecknehmen */
+        left: var(--sa-l); top: var(--sa-t);
+        width: auto; height: auto; overflow: visible;
+        background: #ffffff;
+        border-radius: 999px;
+        padding: 15px 30px 15px 20px;
+        box-shadow: 0 10px 30px rgba(8, 20, 12, 0.24), 0 0 0 2px rgba(21, 122, 57, 0.14);
+        display: flex; align-items: center;
+        z-index: 60;
+      }
+      #bug img { height: 52px; width: auto; display: block; }
+
+      /* ══ Szene 1 — Die Frage (Attention) ═══════════════════════════════ */
+      #s1 { background: #0b0d0c; }
+      #s1-schleier {
+        position: absolute; inset: 0;
+        background: linear-gradient(to bottom,
+          rgba(6, 12, 9, 0.62) 0%, rgba(6, 12, 9, 0.14) 26%,
+          rgba(6, 12, 9, 0.30) 48%, rgba(6, 12, 9, 0.86) 78%,
+          rgba(6, 12, 9, 0.96) 100%);
+      }
+      #s1-frage {
+        position: absolute; left: var(--sa-l); width: var(--sa-w);
+        top: 1004px;
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 800; font-size: 106px; line-height: 1.04;
+        letter-spacing: -0.03em; color: #ffffff;
+        text-shadow: 0 10px 44px rgba(0, 0, 0, 0.6);
+      }
+      #s1-strich {
+        position: absolute; left: var(--sa-l); top: 1262px;
+        width: 168px; height: 8px; background: var(--gruen-hell);
+        transform-origin: left center; border-radius: 4px;
+      }
+      #s1-unter {
+        position: absolute; left: var(--sa-l); width: var(--sa-w);
+        top: 1312px;
+        font-size: 42px; line-height: 1.3; color: rgba(255, 255, 255, 0.92);
+        text-shadow: 0 6px 30px rgba(0, 0, 0, 0.7);
+      }
+
+      /* ══ Szene 2 — Die Verwandlung (Attention + Connection) ════════════ */
+      #s2 { background: #101512; }
+      #s2-nachher-halt, #s2-vorher-halt {
+        position: absolute; inset: 0; overflow: hidden;
+      }
+      #s2-vorher-halt { will-change: clip-path; }
+      #s2-kante {
+        position: absolute; top: 0; left: 0; width: 9px; height: 1920px;
+        background: var(--gruen-hell);
+        box-shadow: 0 0 52px rgba(34, 197, 94, 0.62);
+      }
+      #s2-boden {
+        position: absolute; inset: 0;
+        background: linear-gradient(to bottom,
+          rgba(6, 12, 9, 0.34) 0%, rgba(6, 12, 9, 0) 18%,
+          rgba(6, 12, 9, 0) 56%, rgba(6, 12, 9, 0.50) 74%,
+          rgba(6, 12, 9, 0.74) 100%);
+      }
+      .s2-label {
+        position: absolute; left: var(--sa-l); top: 390px;
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 800; font-size: 34px; letter-spacing: 0.30em;
+        padding: 18px 34px; border-radius: 10px; color: #fff;
+      }
+      #s2-label-vorher  { background: rgba(10, 16, 12, 0.80); }
+      #s2-label-nachher { background: var(--gruen);
+                          box-shadow: 0 12px 34px rgba(21, 122, 57, 0.45); }
+      #s2-zeile {
+        position: absolute; left: var(--sa-l); width: var(--sa-w);
+        top: 1130px;
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 800; font-size: 96px; line-height: 1.04;
+        letter-spacing: -0.03em; color: #ffffff;
+        text-shadow: 0 10px 44px rgba(0, 0, 0, 0.58);
+      }
+      #s2-unter {
+        position: absolute; left: var(--sa-l); width: var(--sa-w);
+        top: 1348px;
+        font-size: 42px; color: rgba(255, 255, 255, 0.92);
+        text-shadow: 0 6px 28px rgba(0, 0, 0, 0.7);
+      }
+
+      /* Markenfuss fuer die hellen Szenen - schliesst die Komposition unten
+         ab, ohne Information in die verdeckte Zone zu legen. */
+      .fuss {
+        position: absolute; left: 0; right: 0; bottom: 0; height: 520px;
+        background: linear-gradient(to bottom,
+          rgba(21, 122, 57, 0) 0%, rgba(21, 122, 57, 0.07) 62%,
+          rgba(21, 122, 57, 0.14) 100%);
+        pointer-events: none;
+      }
+
+      /* ══ Szene 3 — Was wir räumen ══════════════════════════════════════ */
+      #s3 { background: var(--bg-2); }
+      #s3-streifen-halt {
+        position: absolute; top: 0; left: 0; width: 1080px; height: 800px;
+        overflow: hidden;
+      }
+      #s3-streifen {
+        width: 1080px; height: 800px; object-fit: cover; will-change: transform;
+      }
+      #s3-streifen-ton {
+        position: absolute; inset: 0;
+        background: linear-gradient(to bottom,
+          rgba(15, 61, 36, 0.20) 0%, rgba(238, 243, 240, 0) 52%,
+          rgba(238, 243, 240, 0.80) 88%, rgba(238, 243, 240, 1) 100%);
+      }
+      .kopf {
+        position: absolute; left: var(--sa-l); width: var(--sa-w);
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 800; font-size: 82px; letter-spacing: -0.028em;
+        color: var(--text);
+      }
+      .kopf em { font-style: normal; color: var(--gruen); }
+      .kopf::before {
+        content: ''; display: block;
+        width: 96px; height: 8px; border-radius: 4px;
+        background: var(--gruen-hell); margin-bottom: 30px;
+      }
+      #s3-kopf { top: 814px; }
+      #s3-liste {
+        position: absolute; top: 1000px; left: var(--sa-l); width: var(--sa-w);
+        list-style: none;
+      }
+      #s3-liste li {
+        display: flex; align-items: center; gap: 32px; padding: 27px 0;
+        border-bottom: 2px solid rgba(15, 23, 42, 0.10);
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 600; font-size: 58px; letter-spacing: -0.02em;
+        color: var(--text);
+      }
+      #s3-liste li:last-child { border-bottom: none; }
+      .haken {
+        flex: 0 0 auto; width: 60px; height: 60px; border-radius: 50%;
+        background: var(--gruen); display: flex;
+        align-items: center; justify-content: center;
+      }
+      .haken svg {
+        width: 33px; height: 33px; stroke: #fff; stroke-width: 3.4;
+        fill: none; stroke-linecap: round; stroke-linejoin: round;
+      }
+
+      /* ══ Szene 4 — Die Zusagen ═════════════════════════════════════════ */
+      #s4 { background: var(--bg); }
+      #s4-kopf { top: 362px; }
+      .s4-block { position: absolute; left: var(--sa-l); width: var(--sa-w); }
+      #s4-b1 { top: 580px; }
+      #s4-b2 { top: 856px; }
+      .s4-zahl {
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 800; font-size: 152px; line-height: 0.94;
+        letter-spacing: -0.05em; color: var(--gruen);
+        font-variant-numeric: tabular-nums;
+      }
+      .s4-zahl span.e {
+        font-size: 66px; font-weight: 700; letter-spacing: -0.02em;
+      }
+      .s4-unter { margin-top: 10px; font-size: 40px; color: var(--text-2); }
+      #s4-belege {
+        position: absolute; left: var(--sa-l); width: var(--sa-w); top: 1160px;
+        display: flex; flex-wrap: wrap; gap: 18px;
+      }
+      #s4-belege span {
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 600; font-size: 34px; color: var(--gruen);
+        background: rgba(21, 122, 57, 0.09);
+        border: 2px solid rgba(21, 122, 57, 0.24);
+        border-radius: 999px; padding: 15px 26px;
+      }
+      #s4-bewertung {
+        position: absolute; left: var(--sa-l); width: var(--sa-w); top: 1352px;
+        display: flex; align-items: center; gap: 24px;
+      }
+      #s4-sterne { font-size: 50px; color: #f59e0b; letter-spacing: 0.06em; }
+      #s4-bew-text {
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 700; font-size: 44px; color: var(--text);
+      }
+      #s4-bew-text em {
+        display: block; font-style: normal;
+        font-family: 'Open Sans', system-ui, sans-serif;
+        font-weight: 400; font-size: 32px; color: var(--text-2); margin-top: 4px;
+      }
+
+      /* ══ Szene 5 — Ihr Ansprechpartner (Connection) ════════════════════ */
+      #s5 { background: var(--bg-2); }
+      #s5-flaeche {
+        position: absolute; inset: 0;
+        background: radial-gradient(circle at 50% 36%,
+          rgba(34, 197, 94, 0.14) 0%, rgba(238, 243, 240, 0) 60%);
+      }
+      #s5-portraet-halt {
+        position: absolute; left: 340px; top: 392px;
+        width: 400px; height: 400px;
+      }
+      #s5-ring {
+        position: absolute; inset: -14px; border-radius: 50%;
+        border: 5px solid var(--gruen);
+      }
+      #s5-portraet {
+        width: 400px; height: 400px; border-radius: 50%; display: block;
+        box-shadow: 0 26px 60px rgba(15, 61, 36, 0.28);
+      }
+      #s5-badge {
+        position: absolute; left: var(--sa-l); width: var(--sa-w); top: 856px;
+        text-align: center;
+      }
+      #s5-badge span {
+        display: inline-block;
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 700; font-size: 31px; letter-spacing: 0.16em;
+        color: #ffffff; background: var(--gruen);
+        padding: 14px 30px; border-radius: 999px;
+      }
+      #s5-name {
+        position: absolute; left: var(--sa-l); width: var(--sa-w); top: 946px;
+        text-align: center;
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 800; font-size: 82px; letter-spacing: -0.03em;
+        color: var(--text);
+      }
+      #s5-rolle {
+        position: absolute; left: var(--sa-l); width: var(--sa-w); top: 1054px;
+        text-align: center; font-size: 38px; color: var(--text-2);
+      }
+      #s5-satz {
+        position: absolute; left: var(--sa-l); width: var(--sa-w); top: 1168px;
+        text-align: center;
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 600; font-size: 50px; line-height: 1.26;
+        letter-spacing: -0.02em; color: var(--text);
+      }
+      #s5-satz b { color: var(--gruen); font-weight: 800; }
+
+      /* ══ Szene 6 — End-Card (Direction) ════════════════════════════════ */
+      #s6 { background: var(--gruen-tief); }
+      #s6-glanz {
+        position: absolute; inset: 0;
+        background: radial-gradient(circle at 50% 30%,
+          rgba(34, 197, 94, 0.22) 0%, rgba(15, 61, 36, 0) 56%);
+      }
+      #s6-karte {
+        position: absolute; top: 330px; left: 150px; width: 780px;
+        background: #ffffff; border-radius: 30px; padding: 40px 30px;
+        box-shadow: 0 40px 90px rgba(0, 0, 0, 0.38);
+        display: flex; justify-content: center;
+      }
+      #s6-logo { width: 640px; height: auto; display: block; }
+      #s6-cta {
+        position: absolute; left: var(--sa-l); width: var(--sa-w); top: 900px;
+        background: #ffffff; border-radius: 999px; padding: 30px 40px;
+        text-align: center;
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 800; font-size: 52px; letter-spacing: -0.02em;
+        color: var(--gruen);
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.32);
+      }
+      #s6-tel {
+        position: absolute; left: var(--sa-l); width: var(--sa-w); top: 1050px;
+        text-align: center;
+        font-family: 'Montserrat', system-ui, sans-serif;
+        font-weight: 800; font-size: 80px; letter-spacing: -0.02em;
+        color: #ffffff;
+      }
+      #s6-web {
+        position: absolute; left: var(--sa-l); width: var(--sa-w); top: 1162px;
+        text-align: center; font-size: 40px; color: rgba(255, 255, 255, 0.88);
+      }
+      #s6-staedte {
+        position: absolute; left: var(--sa-l); width: var(--sa-w); top: 1290px;
+        text-align: center; font-size: 30px; letter-spacing: 0.02em;
+        line-height: 1.5; color: #86efac;
+        border-top: 2px solid rgba(255, 255, 255, 0.20); padding-top: 32px;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="26"
+      data-width="1080"
+      data-height="1920"
+    >
+      <!-- ══ Szene 1 — Die Frage (0,00 → 3,00) ══════════════════════════ -->
+      <section id="s1" class="clip" data-start="0" data-duration="3.05" data-track-index="0">
+        <img id="s1-foto" class="foto" src="assets/img/hook-keller.jpg" data-layout-allow-overflow
+             alt="Zugestellter Keller vor der Entrümpelung" />
+        <div id="s1-schleier"></div>
+        <h1 id="s1-frage">Wohin mit<br>alldem?</h1>
+        <div id="s1-strich"></div>
+        <div id="s1-unter">Keller, Wohnung, ganzes Haus — irgendwann muss es raus.</div>
+      </section>
+
+      <!-- ══ Szene 2 — Die Verwandlung (3,00 → 8,50) ════════════════════ -->
+      <section id="s2" class="clip" data-start="3" data-duration="5.55" data-track-index="1">
+        <div id="s2-nachher-halt">
+          <img id="s2-nachher" class="foto" src="assets/img/nachher-raum.jpg" data-layout-allow-overflow
+               alt="Derselbe Raum besenrein übergeben nach der Entrümpelung" />
+        </div>
+        <div id="s2-vorher-halt">
+          <img id="s2-vorher" class="foto" src="assets/img/vorher-zimmer.jpg" data-layout-allow-overflow
+               alt="Voll eingerichtete Wohnküche vor der Haushaltsauflösung" />
+        </div>
+        <div id="s2-kante"></div>
+        <div id="s2-boden"></div>
+        <div id="s2-label-vorher" class="s2-label">VORHER</div>
+        <div id="s2-label-nachher" class="s2-label">NACHHER</div>
+        <div id="s2-zeile">Besenrein<br>übergeben.</div>
+        <div id="s2-unter">Ein Termin. Ein Team. Ein Festpreis.</div>
+      </section>
+
+      <!-- ══ Szene 3 — Was wir räumen (8,50 → 13,00) ════════════════════ -->
+      <section id="s3" class="clip" data-start="8.5" data-duration="4.55" data-track-index="2">
+        <div id="s3-streifen-halt">
+          <img id="s3-streifen" src="assets/img/streifen-kueche.jpg" data-layout-allow-overflow
+               alt="Voll möblierte Wohnung vor der Wohnungsauflösung" />
+          <div id="s3-streifen-ton"></div>
+        </div>
+        <div class="fuss"></div>
+        <h2 id="s3-kopf" class="kopf">Wir räumen <em>alles.</em></h2>
+        <ul id="s3-liste">
+          <li><span class="haken"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>Entrümpelung</li>
+          <li><span class="haken"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>Haushaltsauflösung</li>
+          <li><span class="haken"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>Firmenauflösung</li>
+          <li><span class="haken"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>Nachlassräumung</li>
+        </ul>
+      </section>
+
+      <!-- ══ Szene 4 — Die Zusagen (13,00 → 17,50) ══════════════════════ -->
+      <section id="s4" class="clip" data-start="13" data-duration="4.55" data-track-index="3">
+        <div class="fuss"></div>
+        <h2 id="s4-kopf" class="kopf">Was wir <em>zusagen.</em></h2>
+
+        <div id="s4-b1" class="s4-block">
+          <div class="s4-zahl"><span id="s4-z1">0</span><span class="e"> Stunden</span></div>
+          <div class="s4-unter">bis zur Antwort auf Ihre Anfrage</div>
+        </div>
+        <div id="s4-b2" class="s4-block">
+          <div class="s4-zahl"><span id="s4-z2">0</span><span class="e"> Stunden</span></div>
+          <div class="s4-unter">bis zum verbindlichen Angebot</div>
+        </div>
+
+        <div id="s4-belege">
+          <span class="s4-beleg">Festpreis</span>
+          <span class="s4-beleg">Vollversichert</span>
+          <span class="s4-beleg">Entsorgungsnachweis</span>
+        </div>
+        <div id="s4-bewertung">
+          <div id="s4-sterne">★★★★★</div>
+          <div id="s4-bew-text">4,9 von 5<em>18 Google-Bewertungen</em></div>
+        </div>
+      </section>
+
+      <!-- ══ Szene 5 — Ihr Ansprechpartner (17,50 → 21,00) ══════════════ -->
+      <section id="s5" class="clip" data-start="17.5" data-duration="3.55" data-track-index="4">
+        <div id="s5-flaeche"></div>
+        <div class="fuss"></div>
+        <div id="s5-portraet-halt">
+          <img id="s5-portraet" src="assets/img/oliver.png"
+               alt="Oliver Pohl, Gründer und Inhaber von Rümpelwerk Mitteldeutschland" />
+          <div id="s5-ring"></div>
+        </div>
+        <div id="s5-badge"><span>IHR ANSPRECHPARTNER</span></div>
+        <div id="s5-name">Oliver Pohl</div>
+        <div id="s5-rolle">Gründer &amp; Inhaber · Halle (Saale)</div>
+        <div id="s5-satz">Kein Vermittler.<br><b>Vom Angebot bis zur Übergabe.</b></div>
+      </section>
+
+      <!-- ══ Szene 6 — End-Card (21,00 → 26,00) ═════════════════════════ -->
+      <section id="s6" class="clip" data-start="21" data-duration="5" data-track-index="5">
+        <div id="s6-glanz"></div>
+        <div id="s6-karte">
+          <img id="s6-logo" src="assets/img/logo.png"
+               alt="Logo Rümpelwerk Mitteldeutschland" />
+        </div>
+        <div id="s6-cta">Jetzt kostenlos anfragen</div>
+        <div id="s6-tel">+49 163 5027819</div>
+        <div id="s6-web">ruempelwerk-mitteldeutschland.de</div>
+        <div id="s6-staedte">Leipzig · Halle · Magdeburg · Hannover · Dresden · Chemnitz</div>
+      </section>
+
+      <!-- ══ Marken-Bug — liegt über allen Szenen, 0,25 s bis End-Card ══ -->
+      <div id="bug" class="clip" data-start="0" data-duration="21.4" data-track-index="6">
+        <img src="assets/img/logo-lockup.png" alt="Rümpelwerk Mitteldeutschland" />
+      </div>
+
+      <!-- ══ Ton ════════════════════════════════════════════════════════ -->
+      <audio id="bgm" src="assets/music/bett.mp3"
+             data-start="0" data-duration="26" data-volume="1" data-track-index="10"></audio>
+      <audio id="sfx-wisch" src="assets/sfx/wisch.ogg"
+             data-start="4.42" data-duration="0.6" data-volume="0.5" data-track-index="11"></audio>
+      <audio id="sfx-t1" src="assets/sfx/tick.ogg"
+             data-start="9.02" data-duration="0.056" data-volume="0.34" data-track-index="12"></audio>
+      <audio id="sfx-t2" src="assets/sfx/tick.ogg"
+             data-start="10.02" data-duration="0.056" data-volume="0.34" data-track-index="12"></audio>
+      <audio id="sfx-t3" src="assets/sfx/tick.ogg"
+             data-start="11.02" data-duration="0.056" data-volume="0.34" data-track-index="12"></audio>
+      <audio id="sfx-t4" src="assets/sfx/tick.ogg"
+             data-start="12.02" data-duration="0.056" data-volume="0.34" data-track-index="12"></audio>
+      <audio id="sfx-z1" src="assets/sfx/zahl.ogg"
+             data-start="13.52" data-duration="0.135" data-volume="0.42" data-track-index="13"></audio>
+      <audio id="sfx-z2" src="assets/sfx/zahl.ogg"
+             data-start="14.52" data-duration="0.135" data-volume="0.42" data-track-index="13"></audio>
+      <audio id="sfx-stern" src="assets/sfx/stern.ogg"
+             data-start="16.52" data-duration="1.48" data-volume="0.28" data-track-index="14"></audio>
+      <audio id="sfx-oliver" src="assets/sfx/tick.ogg"
+             data-start="17.52" data-duration="0.056" data-volume="0.3" data-track-index="15"></audio>
+      <audio id="sfx-logo" src="assets/sfx/logo.ogg"
+             data-start="21.01" data-duration="0.505" data-volume="0.52" data-track-index="16"></audio>
+      <audio id="sfx-cta" src="assets/sfx/zahl.ogg"
+             data-start="22.01" data-duration="0.135" data-volume="0.36" data-track-index="17"></audio>
+    </div>
+
+    <script>
+      const bauen = () => {
+        const tl = gsap.timeline({ paused: true });
+
+        /* ── Marken-Bug: kommt einmal, bleibt, geht zur End-Card ────────── */
+        tl.fromTo('#bug', { x: -40, opacity: 0 },
+          { x: 0, opacity: 1, duration: 0.45, ease: 'power3.out' }, 0.25);
+        tl.to('#bug', { opacity: 0, duration: 0.25, ease: 'power2.in' }, 21.0);
+
+        /* ── Szene 1 — Die Frage (Attention) ───────────────────────────── */
+        tl.fromTo('#s1-foto', { scale: 1.0, y: 0 },
+          { scale: 1.09, y: -22, duration: 3.05, ease: 'none' }, 0);
+        tl.fromTo('#s1-frage', { y: 66, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.5, ease: 'power3.out' }, 0.30);
+        tl.fromTo('#s1-strich', { scaleX: 0, opacity: 0 },
+          { scaleX: 1, opacity: 1, duration: 0.45, ease: 'power3.out' }, 0.58);
+        tl.fromTo('#s1-unter', { y: 28, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.45, ease: 'power3.out' }, 0.82);
+        tl.to(['#s1-frage', '#s1-strich', '#s1-unter'],
+          { opacity: 0, duration: 0.22, ease: 'power2.in' }, 2.80);
+
+        /* ── Szene 2 — Die Verwandlung ─────────────────────────────────── */
+        const S2 = 3;
+        tl.fromTo('#s2-vorher',  { scale: 1.07 }, { scale: 1.0,  duration: 5.55, ease: 'none' }, S2);
+        tl.fromTo('#s2-nachher', { scale: 1.0 },  { scale: 1.035, duration: 5.55, ease: 'none' }, S2);
+
+        // Ruhezustände setzen, damit kein Seek vor dem ersten Tween die
+        // from-Werte eines später geschriebenen fromTo erbt.
+        tl.set('#s2-kante', { x: 0, opacity: 0 }, 0);
+        tl.set('#s2-label-nachher', { opacity: 0 }, 0);
+
+        // Die Wischkante: das Vorher-Bild wird von links weggeschnitten
+        tl.fromTo('#s2-vorher-halt',
+          { clipPath: 'inset(0px 0px 0px 0px)' },
+          { clipPath: 'inset(0px 0px 0px 1080px)', duration: 1.12, ease: 'power2.inOut' },
+          S2 + 1.42);
+        tl.fromTo('#s2-kante', { opacity: 0 },
+          { opacity: 1, duration: 0.14, ease: 'power1.out', immediateRender: false }, S2 + 1.40);
+        tl.fromTo('#s2-kante', { x: 0 },
+          { x: 1080, duration: 1.12, ease: 'power2.inOut', immediateRender: false }, S2 + 1.42);
+        tl.to('#s2-kante', { opacity: 0, duration: 0.2, ease: 'power2.in' }, S2 + 2.46);
+
+        // Die Beschriftung wechselt an EINER Stelle — VORHER geht, NACHHER kommt
+        tl.fromTo('#s2-label-vorher', { y: -26, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.38, ease: 'power3.out' }, S2 + 0.12);
+        tl.to('#s2-label-vorher', { opacity: 0, duration: 0.2, ease: 'power2.in' }, S2 + 1.44);
+        tl.fromTo('#s2-label-nachher', { y: -26, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.42, ease: 'back.out(1.6)', immediateRender: false }, S2 + 2.50);
+
+        tl.fromTo('#s2-zeile', { y: 58, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.5, ease: 'power3.out' }, S2 + 2.92);
+        tl.fromTo('#s2-unter', { y: 26, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.45, ease: 'power3.out' }, S2 + 3.42);
+        tl.to(['#s2-zeile', '#s2-unter', '#s2-label-nachher'],
+          { opacity: 0, duration: 0.24, ease: 'power2.in' }, S2 + 5.26);
+
+        /* ── Szene 3 — Was wir räumen ──────────────────────────────────── */
+        const S3 = 8.5;
+        tl.fromTo('#s3-streifen', { scale: 1.0, y: 0 },
+          { scale: 1.07, y: -12, duration: 4.55, ease: 'none' }, S3);
+        tl.fromTo('#s3-streifen-halt', { opacity: 0 },
+          { opacity: 1, duration: 0.4, ease: 'power2.out' }, S3);
+        tl.fromTo('#s3-kopf', { y: 42, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.45, ease: 'power3.out' }, S3 + 0.16);
+
+        // Vier Zeilen auf jedem zweiten Beat — jede bleibt bis Szenenende stehen
+        gsap.utils.toArray('#s3-liste li').forEach((li, i) => {
+          const bei = S3 + 0.52 + i;
+          tl.fromTo(li, { x: -48, opacity: 0 },
+            { x: 0, opacity: 1, duration: 0.42, ease: 'power3.out' }, bei);
+          tl.fromTo(li.querySelector('.haken'), { scale: 0.4 },
+            { scale: 1, duration: 0.42, ease: 'back.out(2.2)' }, bei + 0.04);
+        });
+
+        /* ── Szene 4 — Die Zusagen ─────────────────────────────────────── */
+        const S4 = 13;
+        tl.fromTo('#s4-kopf', { y: 40, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.42, ease: 'power3.out' }, S4 + 0.10);
+
+        const zaehler = (ziel, bis, bei) => {
+          const knoten = document.querySelector(ziel);
+          const stand = { v: 0 };
+          tl.to(stand, { v: bis, duration: 0.5, ease: 'power2.out',
+            onUpdate: () => { knoten.textContent = String(Math.round(stand.v)); } }, bei);
+        };
+        tl.fromTo('#s4-b1', { y: 46, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.42, ease: 'power3.out' }, S4 + 0.52);
+        zaehler('#s4-z1', 2, S4 + 0.52);
+        tl.fromTo('#s4-b2', { y: 46, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.42, ease: 'power3.out' }, S4 + 1.52);
+        zaehler('#s4-z2', 24, S4 + 1.52);
+
+        tl.fromTo('#s4-belege .s4-beleg', { y: 30, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.4, ease: 'power3.out', stagger: 0.11 }, S4 + 2.52);
+        tl.fromTo('#s4-bewertung', { y: 30, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.45, ease: 'power3.out' }, S4 + 3.52);
+
+        /* ── Szene 5 — Ihr Ansprechpartner (Connection) ────────────────── */
+        const S5 = 17.5;
+        tl.fromTo('#s5-portraet-halt', { scale: 0.88, opacity: 0 },
+          { scale: 1, opacity: 1, duration: 0.55, ease: 'back.out(1.5)' }, S5 + 0.02);
+        tl.fromTo('#s5-ring', { scale: 1.16, opacity: 0 },
+          { scale: 1, opacity: 1, duration: 0.6, ease: 'power3.out' }, S5 + 0.18);
+        tl.fromTo('#s5-badge', { y: 20, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.4, ease: 'power3.out' }, S5 + 0.42);
+        tl.fromTo('#s5-name', { y: 30, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.45, ease: 'power3.out' }, S5 + 0.62);
+        tl.fromTo('#s5-rolle', { y: 22, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.42, ease: 'power3.out' }, S5 + 0.82);
+        tl.fromTo('#s5-satz', { y: 32, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.5, ease: 'power3.out' }, S5 + 1.32);
+
+        /* ── Szene 6 — End-Card (Direction) ────────────────────────────── */
+        const S6 = 21;
+        tl.fromTo('#s6-glanz', { opacity: 0 },
+          { opacity: 1, duration: 0.9, ease: 'power2.out' }, S6 + 0.01);
+        tl.fromTo('#s6-karte', { scale: 1.08, opacity: 0 },
+          { scale: 1, opacity: 1, duration: 0.45, ease: 'back.out(1.7)' }, S6 + 0.01);
+        // Der CTA schlägt auf den starken Beat bei 22,01 s auf und pulst danach
+        // genau einmal — ein zweiter Blickfang, kein Dauerblinken.
+        tl.fromTo('#s6-cta', { y: 40, scale: 0.94, opacity: 0 },
+          { y: 0, scale: 1, opacity: 1, duration: 0.45, ease: 'back.out(2)' }, S6 + 1.01);
+        tl.to('#s6-cta', { scale: 1.035, duration: 0.28, ease: 'power2.out' }, S6 + 2.51);
+        tl.to('#s6-cta', { scale: 1, duration: 0.42, ease: 'power2.inOut' }, S6 + 2.79);
+        tl.fromTo('#s6-tel', { y: 30, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.45, ease: 'power3.out' }, S6 + 1.51);
+        tl.fromTo('#s6-web', { y: 24, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.42, ease: 'power3.out' }, S6 + 1.76);
+        tl.fromTo('#s6-staedte', { opacity: 0 },
+          { opacity: 1, duration: 0.6, ease: 'power2.out' }, S6 + 2.26);
+        // Ein Endtag steht nie ganz still - 2 % Push-in ueber die ganze Szene.
+        tl.to('#s6-karte', { scale: 1.022, duration: 4.5, ease: 'none' }, S6 + 0.5);
+
+        /* ── Musikbett ─────────────────────────────────────────────────── */
+        tl.fromTo('#bgm', { volume: 0 }, { volume: 0.55, duration: 0.6, ease: 'none' }, 0);
+        tl.to('#bgm', { volume: 0, duration: 1.6, ease: 'power2.in' }, 24.4);
+
+        window.__timelines['main'] = tl;
+        tl.seek(0);
+      };
+
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(bauen);
+      } else {
+        bauen();
+      }
+    </script>
+  </body>
+</html>

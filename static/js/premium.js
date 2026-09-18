@@ -445,7 +445,10 @@
       materialZeigen();
     }
     quelleSetzen(gemerkt?.quelle || "webseite");
-    fokusSetzen(gemerkt?.fokus || "auto");
+    // „marke" gab es bis zum 18.09.2026; wer es gespeichert hat, landet auf „auto".
+    const gemerkterFokus = (zustand.katalog.fokus || [])
+      .some((f) => f.kennung === gemerkt?.fokus) ? gemerkt.fokus : "auto";
+    fokusSetzen(gemerkterFokus);
     tonfallSetzen(gemerkt?.tonfall || "polished");
     dauerSetzen(gemerkt?.dauer || zustand.katalog.dauern[1] || 22);
   }

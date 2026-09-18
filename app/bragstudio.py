@@ -79,16 +79,31 @@ SPRACHEN = [{"kennung": "de", "name": "Deutsch"}, {"kennung": "en", "name": "Eng
 #: wird das, was darauf steht.
 FOKUS = [
     {"kennung": "auto", "name": "Automatisch",
-     "beschreibung": "Das Programm sieht sich das Material an und entscheidet: viele "
-                     "echte Produkt- oder Arbeitsfotos → Marke; eine Seite, die ein "
-                     "Angebot erklärt → Webseite."},
-    {"kennung": "marke", "name": "Marke & Produkte",
-     "beschreibung": "Der Film zeigt die Ware, die Arbeit, die Menschen. Die Bilder "
-                     "tragen ihn, der Text ist kurz. Für Shops, Handwerk, Gastronomie."},
+     "beschreibung": "Das Programm sieht sich das Material an und entscheidet — "
+                     "Ware, Arbeit oder Angebot."},
+    {"kennung": "produkt", "name": "Produkt & Marke",
+     "beschreibung": "Die Ware trägt den Film: Kleidung, Speisen, Möbel, Handwerk zum "
+                     "Anfassen. Bilder groß, Text kurz. Vorbild: Luviq."},
+    {"kennung": "dienstleistung", "name": "Dienstleistung",
+     "beschreibung": "Die Arbeit und ihr Ergebnis tragen den Film: Vorher/Nachher, "
+                     "Leistungen, Zusagen, Gesicht, End-Card mit einer Handlung. "
+                     "Vorbild: Rümpelwerk, Flügel."},
     {"kennung": "webseite", "name": "Webseite & Angebot",
      "beschreibung": "Der Film zeigt die Seite selbst: Preise, Ablauf, Oberfläche. "
-                     "Für Dienstleistungen, Software und alles, was erklärt werden muss."},
+                     "Für Software und alles, was erklärt werden muss."},
 ]
+
+#: Wörter, die eine **Dienstleistung** anzeigen — es wird Arbeit verkauft, kein Ding.
+_DIENSTWORTE = re.compile(
+    r"(reinigung|entrümpel|entsorg|sanierung|renovier|montage|installat|wartung|"
+    r"hausmeister|winterdienst|gartenpflege|galabau|heckenschnitt|pflege|räumung|"
+    r"umzug|dachdeck|maler|elektr|sanitär|heizung|schlüsseldienst|pflasterarbeit|"
+    r"angebot einholen|termin|besichtigung|kostenlos anfragen|festpreis)", re.IGNORECASE)
+
+#: Wörter, die ein **Produkt** anzeigen — es wird ein Ding verkauft.
+_PRODUKTWORTE = re.compile(
+    r"(shop|warenkorb|kollektion|unikat|produkt|bestell|kaufen|sortiment|größe|"
+    r"lieferzeit|versand|ausverkauft|sold|artikel|speisekarte|menü)", re.IGNORECASE)
 
 #: Wörter, die für einen Marken-/Produktfilm sprechen (Verkauf von Dingen und Arbeit).
 _MARKENWORTE = re.compile(
@@ -104,19 +119,25 @@ _ANGEBOTSWORTE = re.compile(
 
 
 def fokus_bestimmen(bilder: list, texte: dict, gewaehlt: str = "auto") -> dict:
-    """Entscheidet, worum der Film geht — und sagt, warum.
+    """Entscheidet, **welche Sorte Film** gebaut wird — und sagt, warum.
 
-    Die Regel ist bewusst einfach und an Material gebunden, nicht an Meinung: **Wer
-    genug echte Motivbilder hat, bekommt einen Film über die Marke.** Denn ein Film über
-    Kleidungsstücke, in dem keine Kleidungsstücke vorkommen, ist kein guter Film — genau
-    das war der erste Luviq-Versuch (rein typografisch, weil kein einziges Bild vorlag).
+    Drei Sorten, weil es drei Arten von Geschäft gibt, und jede braucht einen anderen
+    Film:
 
-    Ohne Bilder bleibt nur die Seite selbst, und dann ist ein Film über Angebot, Preise
-    und Ablauf das Ehrlichere.
+    * **produkt** — verkauft wird ein Ding. Die Ware trägt den Film (Luviq).
+    * **dienstleistung** — verkauft wird Arbeit. Ihr Ergebnis trägt den Film:
+      Vorher/Nachher, Zusagen, das Gesicht, eine Handlungsaufforderung (Rümpelwerk,
+      Flügel).
+    * **webseite** — es gibt nichts zu fotografieren, nur ein Angebot zu erklären.
+
+    Die Entscheidung hängt an Material und Wortfeld, nicht an Geschmack. Ein Film über
+    Kleidungsstücke ohne Kleidungsstücke ist so falsch wie ein Film über eine
+    Gebäudereinigung, in dem keine gereinigte Fläche vorkommt.
     """
-    if gewaehlt in ("marke", "webseite"):
-        return {"fokus": gewaehlt, "gewaehlt": True,
-                "begruendung": "So ausgewählt."}
+    if gewaehlt in ("produkt", "dienstleistung", "webseite"):
+        return {"fokus": gewaehlt, "gewaehlt": True, "begruendung": "So ausgewählt."}
+    if gewaehlt == "marke":          # Fassung vor dem 18.09.2026
+        gewaehlt = "auto"
 
     anzahl = len(bilder or [])
     worte = " ".join(str(w) for w in [
@@ -125,23 +146,29 @@ def fokus_bestimmen(bilder: list, texte: dict, gewaehlt: str = "auto") -> dict:
         " ".join(texte.get("knoepfe", []) or []),
         " ".join(str(b.get("hinweis", "")) for b in (bilder or [])),
     ])
-    marken_treffer = len(set(m.group(0).lower() for m in _MARKENWORTE.finditer(worte)))
-    angebots_treffer = len(set(m.group(0).lower() for m in _ANGEBOTSWORTE.finditer(worte)))
+    dienst = len(set(m.group(0).lower() for m in _DIENSTWORTE.finditer(worte)))
+    produkt = len(set(m.group(0).lower() for m in _PRODUKTWORTE.finditer(worte)))
+    angebot = len(set(m.group(0).lower() for m in _ANGEBOTSWORTE.finditer(worte)))
 
-    if anzahl >= 4 and marken_treffer >= angebots_treffer:
-        return {"fokus": "marke", "gewaehlt": False,
-                "begruendung": f"{anzahl} echte Motivbilder und {marken_treffer} Hinweise "
-                               "auf Ware oder Arbeit — der Film zeigt die Marke."}
-    if anzahl >= 4 and angebots_treffer > marken_treffer + 2:
+    if anzahl < 4:
         return {"fokus": "webseite", "gewaehlt": False,
-                "begruendung": f"{angebots_treffer} Hinweise auf ein erklärungsbedürftiges "
+                "begruendung": f"Nur {anzahl} verwendbare Bild(er) — der Film erzählt die "
+                               "Seite und ihr Angebot, statt Bilder vorzutäuschen."}
+    if dienst > produkt:
+        return {"fokus": "dienstleistung", "gewaehlt": False,
+                "begruendung": f"{anzahl} Arbeitsfotos und {dienst} Hinweise auf "
+                               "Dienstleistung — der Film zeigt Arbeit und Ergebnis."}
+    if produkt > 0 and produkt >= dienst:
+        return {"fokus": "produkt", "gewaehlt": False,
+                "begruendung": f"{anzahl} Motivbilder und {produkt} Hinweise auf Ware — "
+                               "der Film zeigt das Produkt."}
+    if angebot > dienst + produkt:
+        return {"fokus": "webseite", "gewaehlt": False,
+                "begruendung": f"{angebot} Hinweise auf ein erklärungsbedürftiges "
                                "Angebot — der Film zeigt die Seite und ihr Angebot."}
-    if anzahl >= 4:
-        return {"fokus": "marke", "gewaehlt": False,
-                "begruendung": f"{anzahl} echte Motivbilder liegen vor — sie tragen den Film."}
-    return {"fokus": "webseite", "gewaehlt": False,
-            "begruendung": f"Nur {anzahl} verwendbare Bild(er) — der Film erzählt die "
-                           "Seite und ihr Angebot, statt Bilder vorzutäuschen."}
+    return {"fokus": "dienstleistung", "gewaehlt": False,
+            "begruendung": f"{anzahl} echte Fotos ohne klares Warensignal — behandelt "
+                           "wie eine Dienstleistung: Arbeit, Ergebnis, Ansprechpartner."}
 
 #: Dateiendungen, die als Material taugen. Alles andere wird nicht mitgenommen —
 #: ein Projektordner enthält sonst schnell ein Gigabyte Abhängigkeiten.
@@ -524,9 +551,46 @@ def _verzeichnis(ordner: Path, grenze: int = 120) -> str:
 
 # ── Der Auftragstext für den Agenten ─────────────────────────────────────────
 
-#: Was ein Film über die **Marke** leisten muss. Der Unterschied zum Webseiten-Film ist
-#: nicht der Ton, sondern das, was auf der Leinwand passiert: Hier sieht man die Ware.
-_FOKUS_MARKE = """\
+#: Was ein **Dienstleistungs-Film** leisten muss. Das Gerüst stammt aus der
+#: Rümpelwerk-Produktion (siehe `rezept/HANDWERK-werbefilm.md`) und ist an Googles
+#: ABCD-Rahmen gebaut: Aufmerksamkeit, Marke von Anfang an, Mensch, eine Handlung.
+_FOKUS_DIENSTLEISTUNG = """\
+## Worum dieser Film geht: die Arbeit und ihr Ergebnis
+
+Verkauft wird keine Ware, sondern **Arbeit**. Der Zuschauer will einen Beweis, dass sein
+Problem lösbar ist — und dass der, der es löst, greifbar ist.
+
+Der Bauplan (ABCD), in dieser Reihenfolge:
+
+1. **Das Problem (0–3 s).** Ein Bild, das die Alltagsrealität des Zuschauers spiegelt —
+   das ungemähte Grundstück, die verschmutzte Fläche, der volle Keller. Eine Frage oder
+   ein Satz dazu. Kein Aufbau, kein Vorspann.
+2. **Der Beweis (3–9 s).** **Vorher/Nachher, wenn es echte Paare gibt** — dann muss es
+   derselbe Ort sein, erkennbar an Boden, Wand, Fenster. Das Vorher steht mindestens
+   1,4 Sekunden, bevor die Kante läuft: Der Reveal ist nur so viel wert wie die Zeit,
+   die das Problem vorher bekommen hat. Gibt es keine Paare: das stärkste
+   Ergebnisbild, groß, mit einer Zeile.
+3. **Was angeboten wird (9–13 s).** Drei bis vier Leistungen, **einzeln** über echten
+   Fotos, jede auf ihrem Beat. Keine Liste auf einer Fläche.
+4. **Was zugesagt wird (13–17 s).** Die belegbaren Zusagen des Betriebs: Antwortzeit,
+   Festpreis, Versicherung, Bewertung, Jahre am Markt. **Nur, was im Material steht.**
+5. **Der Mensch (17–21 s).** Das Gesicht des Inhabers mit Name, Rolle und Ort. Bei
+   lokalen Betrieben ist das der stärkste Vertrauensbeleg, weil Plattformen und
+   Vermittler anonym bleiben. Nur verwenden, wenn belegt ist, wen das Bild zeigt.
+6. **Die End-Card (21–26 s).** Eigene Fläche in der Markenfarbe, Logo, **genau eine**
+   Handlungsaufforderung als Knopfform („Jetzt kostenlos anfragen"), darunter Telefon
+   und Adresse, dazu die Orte des Einzugsgebiets. Mindestens 4,5 Sekunden Standzeit.
+   Sie bewegt sich leicht (2 % Push-in), steht aber nie still.
+
+**Der Marken-Bug ist Pflicht:** Logo in einer kleinen Fläche, oben in der sicheren
+Zone, ab Sekunde 0,25 durchgehend bis zur End-Card. Wer nach vier Sekunden wegwischt,
+muss trotzdem wissen, wer geworben hat.
+
+**Zahlen brauchen Belege.** Schreibe zu jeder Zahl im Auftrag dazu, woher sie stammt.
+Was sich nicht belegen lässt, kommt nicht ins Bild."""
+
+#: Was ein Film über das **Produkt** leisten muss: Hier sieht man die Ware.
+_FOKUS_PRODUKT = """\
 ## Worum dieser Film geht: die Marke und ihre Ware
 
 Der Film zeigt das, was verkauft wird — die Produkte, die Arbeit, die Menschen. **Nicht
@@ -597,7 +661,7 @@ Gliederung:
 #: 22 Sekunden lang Schrift auf schwarzem Grund — für einen Laden, der bemalte
 #: Kleidungsstücke verkauft. Die Bilder lagen nur nicht vor. Jetzt liegen sie vor, und
 #: diese Regel sorgt dafür, dass sie auch benutzt werden.
-_BILDREGEL_MARKE = """\
+_BILDREGEL_PRODUKT = """\
 ### Pflicht: Die Fotos tragen diesen Film
 
 {bilderliste}
@@ -622,6 +686,25 @@ _BILDREGEL_MARKE = """\
 - Schneide Fotos formatgerecht (`object-fit: cover`): im Hochformat hochkant, im
   Querformat quer — ein verzerrtes Produktfoto ist schlimmer als keines."""
 
+_BILDREGEL_DIENSTLEISTUNG = """\
+### Pflicht: Arbeit und Ergebnis sind zu sehen
+
+{bilderliste}
+
+- **Sieh dir jedes Foto zuerst an** (Read-Werkzeug). Der Dateiname sagt oft nur
+  „galerie_04". Ordne dann zu: Was ist ein **Vorher**, was ein **Nachher**, was ein
+  Leistungsbild, was ein Gesicht?
+- **Suche nach echten Paaren**: zwei Aufnahmen desselben Ortes, erkennbar an Boden,
+  Wand, Fenster, Dachkante. Findest du eines, ist es die stärkste Szene des Films —
+  Vorher mindestens 1,4 s stehen lassen, dann eine Wischkante über 1,0–1,2 s.
+  Findest du keines, **behaupte keines**: zwei schöne Bilder aus zwei Orten
+  nebeneinander sind kein Beweis, und der Zuschauer merkt es.
+- **Mindestens zwei Drittel der Laufzeit ist ein Foto zu sehen**, formatfüllend, mit
+  ruhiger Bewegung. Jede Leistung bekommt ihr eigenes Bild.
+- Text liegt über dem Bild mit dunklem Verlauf darunter — nie ohne.
+- Gesichter nur mit Beleg, wen sie zeigen (Bildunterschrift, Alt-Text, „Inhaber").
+- Formatgerecht schneiden (`object-fit: cover`), niemals verzerren."""
+
 _BILDREGEL_WEBSEITE = """\
 ### Bildmaterial
 
@@ -645,10 +728,18 @@ zum fertigen Ergebnis und stelle keine Rückfragen.
    Material sichten → Plan schreiben → Komposition bauen → prüfen → rendern.
    Lies dazu die Hyperframes-Skills (`hyperframes-core`, `-animation`, `-creative`,
    `-cli`). Starte NICHT den Hyperframes-Einstiegs-Workflow mit Rückfragen.
-3. `rezept/referenz-querformat.html` und `rezept/referenz-hochformat.html` sind fertige,
-   geprüfte Kompositionen. Übernimm daraus die MACHART (Zeitachse, Audio-Verdrahtung,
-   audio-reaktive Schleife, Szenenwechsel, Beat-Kommentare), NIEMALS die Inhalte,
-   Farben, Schriften oder Texte — die gehören einem anderen Kunden.
+3. **Lies `rezept/HANDWERK-werbefilm.md`** — das Handwerkswissen aus einer fertigen,
+   abgenommenen Produktion: ABCD-Gerüst, sichere Zonen der Apps, Vorher/Nachher,
+   Farbgrading als Dramaturgie, Schnitt aufs Taktraster, End-Card, Bildaufbereitung
+   kleiner Vorlagen. Bei einem Dienstleistungs-Film ist es die Hauptquelle.
+4. Drei fertige, geprüfte Kompositionen liegen bei. Übernimm daraus die MACHART
+   (Zeitachse, Audio-Verdrahtung, Bewegungsschnitte, Masken, Beat-Kommentare),
+   NIEMALS Inhalte, Farben, Schriften oder Texte — die gehören anderen Kunden:
+   - `rezept/referenz-dienstleistung-hochformat.html` — **der Maßstab für einen
+     Dienstleistungs-Film**: Marken-Bug, Vorher/Nachher mit Wischkante, Leistungen
+     einzeln, Zusagen mit Zählern, Ansprechpartner, End-Card mit einem CTA.
+   - `rezept/referenz-querformat.html` und `rezept/referenz-hochformat.html` — ein
+     Webseiten-/Angebotsfilm in beiden Formaten.
 
 ## Material
 Alles Material liegt in diesem Arbeitsordner:
@@ -740,8 +831,10 @@ def master_prompt_schreiben(premium: dict, material: dict, ordner: Path,
         teile.append("Ausschnitte aus den wichtigsten Dateien:\n" + material["leseproben"])
 
     fokus = (material.get("fokus") or {}).get("fokus", "webseite")
-    system = _PROMPT_SYSTEM.format(
-        fokus=_FOKUS_MARKE if fokus == "marke" else _FOKUS_WEBSEITE)
+    system = _PROMPT_SYSTEM.format(fokus={
+        "produkt": _FOKUS_PRODUKT,
+        "dienstleistung": _FOKUS_DIENSTLEISTUNG,
+    }.get(fokus, _FOKUS_WEBSEITE))
     auftrag = "\n\n".join(teile)
     antwort = llm.erzeuge(system, auftrag, zeitlimit=300)
     text = antwort.text.strip()
@@ -856,7 +949,8 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
     shutil.copytree(config.BASE_DIR / "bragvorlage", arbeit / "rezept", dirs_exist_ok=True)
 
     fokus = (material.get("fokus") or {}).get("fokus", "webseite")
-    vorlage = _BILDREGEL_MARKE if fokus == "marke" else _BILDREGEL_WEBSEITE
+    vorlage = {"produkt": _BILDREGEL_PRODUKT,
+               "dienstleistung": _BILDREGEL_DIENSTLEISTUNG}.get(fokus, _BILDREGEL_WEBSEITE)
     vorspann = _AGENT_VORSPANN.format(
         minuten=config.BRAG_ZEITLIMIT // 60,
         materialuebersicht=material["verzeichnis"],
