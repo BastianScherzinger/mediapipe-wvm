@@ -200,8 +200,17 @@ def werkzeuge_sichern(melden=None) -> None:
     Läuft bei jedem Auftrag, tut aber nach dem ersten Mal nichts mehr — die Prüfung ist
     ein Dateizugriff.
     """
-    gut, grund = bereit()
-    if not gut:
+    # Dreimal fragen, bevor aufgegeben: Ein Werkzeug, das sich gerade selbst
+    # aktualisiert, ist für Sekunden weg und danach wieder da. Ein Auftrag, in dem
+    # schon eine halbe Stunde Arbeit steckt, darf daran nicht sterben.
+    for versuch in range(3):
+        gut, grund = bereit()
+        if gut:
+            break
+        if versuch < 2:
+            logbook.warnung(QUELLE, f"{grund} — es wird in 5 Sekunden erneut geprüft.")
+            time.sleep(5)
+    else:
         raise errors.KonfigurationsFehler(
             "Für einen Premium-Film fehlt eine Voraussetzung.", grund, ursprung=QUELLE)
     _brag_skill_holen(melden)

@@ -256,6 +256,29 @@ TikTok, Reels und WhatsApp. Nicht beschnitten, sondern zweimal gebaut.
 | **Projektordner** | Die Seite liegt auf diesem Rechner | Liest die echten Texte, Preise, Farben, Schriften und Bilder — das ergibt die besten Filme |
 | **Thema oder Produkt** | Es gibt gar keine Seite | Nimmt Ihre Beschreibung und das hochgeladene Material |
 
+### Die zweite Frage: welche Sorte Film?
+
+Ein Modeladen, eine Gebäudereinigung und eine Software brauchen drei verschiedene
+Filme. Das ist keine Geschmacksfrage, sondern entscheidet, was auf der Leinwand
+passiert:
+
+| Sorte | Wofür | Was den Film trägt |
+|---|---|---|
+| **Produkt & Marke** | Shop, Mode, Speisen, Möbel | Die Ware, groß und ruhig bewegt. Text ist Beiwerk |
+| **Dienstleistung** | Reinigung, Garten, Entrümpelung, Handwerk | Problem → Vorher/Nachher → Leistungen → Zusagen → Gesicht → End-Card mit einer Handlung |
+| **Webseite & Angebot** | Software, Beratung, Erklärungsbedürftiges | Die Aussage, die Zahl, der Ablauf, die Oberfläche |
+
+**„Automatisch“ ist die Vorgabe** — das Programm sieht sich an, was es gefunden hat, und
+entscheidet: viele Arbeitsfotos und Wörter wie „Reinigung“ oder „Termin“ → Dienstleistung;
+Warenkorb und Kollektion → Produkt; kaum Bilder → Webseite. Die Entscheidung samt
+Begründung steht danach unter der Auswahl und im Logbuch. Wer es besser weiß, wählt
+selbst.
+
+Der Dienstleistungs-Film folgt dabei dem Bauplan, der sich beim Werbevideo für Rümpelwerk
+Mitteldeutschland bewährt hat: Marke ab Sekunde 0 sichtbar, echtes Vorher/Nachher (nur
+wenn es Paare vom selben Ort gibt), Leistungen einzeln, belegte Zusagen, das Gesicht des
+Inhabers, End-Card mit genau einer Handlungsaufforderung.
+
 Dazu kommen Kunde, Zielgruppe, Tonalität, Länge und — unter „Feinheiten“ — Botschaft,
 Handlungsaufforderung, Kontaktzeile und ein freier Wunsch an Claude.
 

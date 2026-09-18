@@ -151,6 +151,77 @@ def test_ordner_pruefen_zaehlt_inhalte(tmp_path):
     assert not bragstudio.ordner_pruefen(str(leer))["taugt"]
 
 
+# ── Welche Sorte Film? ───────────────────────────────────────────────────────
+
+def _bilder(anzahl: int, name: str = "foto"):
+    return [{"hinweis": f"{name}_{i}", "breite": 1200, "hoehe": 900,
+             "datei": Path(f"{name}_{i}.jpg")} for i in range(anzahl)]
+
+
+def test_dienstleister_bekommt_den_dienstleistungsfilm():
+    """Gebäudereinigung mit Galeriefotos — das ist Arbeit, keine Ware."""
+    befund = bragstudio.fokus_bestimmen(
+        _bilder(8, "galerie"),
+        {"titel": "Flügel Haus & Gebäudeservice",
+         "ueberschriften": ["Gebäudereinigung", "Gartenpflege", "Winterdienst"],
+         "knoepfe": ["Angebot einholen", "Termin vereinbaren"]})
+    assert befund["fokus"] == "dienstleistung"
+    assert "Arbeitsfotos" in befund["begruendung"]
+
+
+def test_shop_bekommt_den_produktfilm():
+    befund = bragstudio.fokus_bestimmen(
+        _bilder(6, "produkt"),
+        {"titel": "Handbemalte Second-Hand-Mode",
+         "ueberschriften": ["Aktuelle Unikate", "Kollektion"],
+         "knoepfe": ["In den Warenkorb", "Bestellen"]})
+    assert befund["fokus"] == "produkt"
+
+
+def test_ohne_bilder_gibt_es_den_webseitenfilm():
+    """Was nicht fotografiert ist, wird nicht behauptet."""
+    befund = bragstudio.fokus_bestimmen(
+        [], {"titel": "Webagentur", "ueberschriften": ["Festpreis", "Website"]})
+    assert befund["fokus"] == "webseite"
+
+
+def test_eigene_wahl_schlaegt_die_erkennung():
+    befund = bragstudio.fokus_bestimmen(_bilder(9, "galerie"),
+                                        {"titel": "Reinigung"}, gewaehlt="webseite")
+    assert befund["fokus"] == "webseite" and befund["gewaehlt"]
+
+
+def test_alte_kennung_marke_faellt_auf_die_erkennung_zurueck():
+    """Bis zum 18.09.2026 hieß die Sorte „marke“ — gespeicherte Aufträge müssen laufen."""
+    befund = bragstudio.fokus_bestimmen(_bilder(6, "galerie"),
+                                        {"titel": "Gartenpflege und Reinigung"},
+                                        gewaehlt="marke")
+    assert befund["fokus"] in ("dienstleistung", "produkt")
+    assert not befund["gewaehlt"]
+
+
+def test_jede_sorte_hat_einen_eigenen_bauplan():
+    """Ohne eigenen Bauplan wäre die Auswahl eine Attrappe."""
+    bauplaene = {bragstudio._FOKUS_PRODUKT, bragstudio._FOKUS_DIENSTLEISTUNG,
+                 bragstudio._FOKUS_WEBSEITE}
+    assert len(bauplaene) == 3
+    assert "End-Card" in bragstudio._FOKUS_DIENSTLEISTUNG
+    assert "Vorher/Nachher" in bragstudio._FOKUS_DIENSTLEISTUNG
+    bildregeln = {bragstudio._BILDREGEL_PRODUKT, bragstudio._BILDREGEL_DIENSTLEISTUNG,
+                  bragstudio._BILDREGEL_WEBSEITE}
+    assert len(bildregeln) == 3
+
+
+def test_handwerkswissen_liegt_bei():
+    """Der Agent liest es bei jedem Dienstleistungsfilm — fehlt es, baut er ins Blaue."""
+    vorlage = config.BASE_DIR / "bragvorlage"
+    for datei in ("REZEPT.md", "HANDWERK-werbefilm.md",
+                  "referenz-dienstleistung-hochformat.html",
+                  "referenz-querformat.html", "referenz-hochformat.html"):
+        assert (vorlage / datei).exists(), f"{datei} fehlt"
+    assert "HANDWERK-werbefilm.md" in bragstudio._AGENT_VORSPANN
+
+
 # ── Der Ereignisstrom der CLI ────────────────────────────────────────────────
 
 def test_ereignisstrom_wird_zu_einer_abrechnung():

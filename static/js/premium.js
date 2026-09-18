@@ -32,7 +32,7 @@
 
   const SPEICHER = "mpw.premium";
 
-  MPW.premium = { aufbauen, sperren, zeile, promptZeigen };
+  MPW.premium = { aufbauen, sperren, zeile, promptZeigen, fokusGemeldet };
 
   function aufbauen(start) {
     zustand.katalog = start.premium || null;
@@ -384,6 +384,16 @@
     zustand.material = [];
     materialZeigen();
     merken();
+  }
+
+  /** Was das Programm aus dem Material gemacht hat — Sorte samt Begründung. */
+  function fokusGemeldet(nachricht) {
+    const befund = nachricht?.fokus;
+    if (!befund) return;
+    const name = (zustand.katalog?.fokus || [])
+      .find((f) => f.kennung === befund.fokus)?.name || befund.fokus;
+    $("#pr-fokus-hinweis").textContent = `Erkannt: ${name} — ${befund.begruendung}`;
+    $("#pr-fokus-hinweis").dataset.art = "gut";
   }
 
   /** Zeigt den Auftrag, den Claude geschrieben hat — sobald er im Ablauf gemeldet wird. */

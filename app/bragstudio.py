@@ -1174,8 +1174,9 @@ def _material_sammeln(auftrag_id: str, p: dict, arbeit: Path,
 
     material["bilder"] = bilder
     material["fokus"] = fokus_bestimmen(bilder, material["texte"], p.get("fokus", "auto"))
-    logbook.info(QUELLE, f"Fokus: {material['fokus']['fokus']} — "
+    logbook.info(QUELLE, f"Sorte: {material['fokus']['fokus']} — "
                          f"{material['fokus']['begruendung']}", job=auftrag_id)
+    logbook.ereignis("premium", {"fokus": material["fokus"]}, job=auftrag_id)
 
     _fortschritt(auftrag_id, "material", 0.95, 0, "Verzeichnis wird erstellt")
     material["verzeichnis"] = _verzeichnis(arbeit)

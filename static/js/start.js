@@ -58,7 +58,10 @@
     MPW.beiEreignis("auftrag", auftragsereignis);
     // Der Auftrag, den Claude für den Premium-Film geschrieben hat: Er wird angezeigt,
     // sobald er steht — nicht erst am Ende. Der Kunde soll sehen, was gebaut wird.
-    MPW.beiEreignis("premium", (nachricht) => MPW.premium.promptZeigen(nachricht.master_prompt));
+    MPW.beiEreignis("premium", (nachricht) => {
+      MPW.premium.promptZeigen(nachricht.master_prompt);
+      MPW.premium.fokusGemeldet(nachricht);
+    });
     MPW.beiEreignis("warteschlange", () => zustandAbgleichen());
     MPW.beiEreignis("verbunden", zustandAbgleichen);
 

@@ -212,11 +212,32 @@ def ffmpeg_pfad() -> str:
     return ""
 
 
+_claude_cli_gemerkt: str = ""
+
+
 def claude_cli_pfad() -> str:
-    """Pfad zur Claude-CLI. Unter Windows liegt sie als .cmd-Hülle vor."""
-    for name in ("claude.cmd", "claude.exe", "claude"):
-        pfad = shutil.which(name)
-        if pfad:
+    """Pfad zur Claude-CLI. Unter Windows liegt sie als .cmd-Hülle vor.
+
+    Der einmal gefundene Pfad wird gemerkt und nur noch auf Vorhandensein geprüft.
+    Grund: Am 18.09.2026 ist ein Premium-Film nach 40 Minuten Materialarbeit daran
+    gescheitert, dass `which claude.cmd` in genau diesem Moment nichts fand — die CLI
+    hatte sich gerade selbst aktualisiert und ihre Hülle für ein paar Sekunden
+    ersetzt. Eine Sekunde später war sie wieder da. Ein Werkzeug, das sich im Betrieb
+    erneuert, darf keinen Auftrag kosten.
+    """
+    global _claude_cli_gemerkt
+    if _claude_cli_gemerkt and Path(_claude_cli_gemerkt).exists():
+        return _claude_cli_gemerkt
+
+    kandidaten = [shutil.which(name) for name in ("claude.cmd", "claude.exe", "claude")]
+    # Der übliche Ort einer npm-Installation — falls der Suchpfad gerade nichts hergibt.
+    npm = os.environ.get("APPDATA", "")
+    if npm:
+        kandidaten += [str(Path(npm) / "npm" / "claude.cmd"),
+                       str(Path(npm) / "npm" / "claude.exe")]
+    for pfad in kandidaten:
+        if pfad and Path(pfad).exists():
+            _claude_cli_gemerkt = pfad
             return pfad
     return ""
 
