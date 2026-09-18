@@ -74,6 +74,64 @@ Logo auf 20,19 s.
 - Vier Aufzählungspunkte in 4 s sind zu viel: Entweder jeden zweiten Beat nehmen oder die
   Szene verlängern. Tempo entsteht durch Bewegung und Schnitt, nicht durch kurzes Text-Blinken.
 
+## 3b. Text und Bild werden getrennt — die Regel mit dem größten Hebel
+
+**Am 18.09.2026 wurden zwei fertige Filme abgelehnt, obwohl handwerklich alles stimmte.**
+Der Grund: In beiden lag fast jede Zeile auf einem Foto, gehalten von einem Verlauf. Der
+Auftraggeber dazu, über dieselbe Marke, am selben Tag: *„stört, dass der Text vor dem Bild
+ist … man kann Texte auf dem Bild nicht lesen."*
+
+**Ein Verlauf unter dem Text ist keine Lösung, sondern das Eingeständnis, dass der Text dort
+nicht hingehört.** Drei Bauformen sind erlaubt:
+
+| | Aufbau | Wofür |
+|---|---|---|
+| **Panorama** | Foto füllt die Fläche, darunter ein Band mit dem Text auf eigenem Grund | Hochformat, jede Bildszene |
+| **Zweiteilung** | Foto auf der einen Seite, Textfläche auf der anderen, harte Kante 3–4 px | Querformat, Porträts |
+| **Tafel** | nur Schrift auf Markengrund, kein Bild | Aussagen, Zahlen, Listen |
+
+Im **Querformat** staucht ein Panorama das Foto. Dort wird die Trennung **in der Zeit**
+gebaut:
+
+```
+FOTO (1,2 s, kein Text)  →  TAFEL (1,3 s, nur Schrift)  →  FOTO  →  TAFEL  …
+```
+
+Das löst drei Probleme mit einem Griff: kein Text auf dem Motiv, doppelte Schnittzahl, und
+der Hell/Dunkel-Wechsel aus 4d Regel 4 entsteht von selbst.
+
+**Auf dem Foto erlaubt bleiben:** der Marken-Bug, ein Chip (`VORHER`) und eine kleine
+Bildunterschrift in einer echten Ruhezone. **Nie die Aussage des Films.**
+
+### Wenn doch Text auf ein Foto muss: die Diagonale
+
+Steht die Bildunterschrift unten links, gehört das Motiv **oben rechts**. `object-position`
+ist das Kompositionswerkzeug dafür, nicht nur ein Füllwerkzeug.
+
+**Erst den Anker festlegen, dann jeden Ausschnitt so schieben, dass die Ankerecke ruhig ist.**
+
+Der abgelehnte Film hatte den festen Anker (richtig), aber die Ausschnitte folgten ihm nicht:
+„Gartenpflege" lag auf dem Rasen mit dem Gerät, „Hausmeisterservice" auf dem Werkzeug — der
+Text verdeckte jedes Mal genau den Beweis, den er behauptete. **Prüffrage an jedem Standbild:
+Liegt die Schrift auf etwas, das man sehen soll?**
+
+## 3c. Die Schrift trägt die Marke
+
+**Inter, Anton, Bebas und Space Grotesk sind verboten**, solange es keinen ausdrücklichen
+Grund für sie gibt. Sie sind die Standardschriften jeder Vorlage und lassen jeden Film
+beliebig wirken — auch einen technisch fehlerfreien.
+
+- **Gibt der Auftrag Schrift und Farben der Marke vor** (Feld „Markenvorgaben", oder eine
+  Design-Datei im Projektordner), sind sie **verbindlich**. Nichts davon neu erfinden.
+- **Gibt es keine Vorgabe:** Schrift aus Logo, Motiven und Handwerk ableiten. Eine
+  charakterstarke Anzeigenschrift für Schlagzeilen, eine ruhige für den Rest.
+- Schriften **selbst mitliefern** (WOFF2 in `assets/fonts/`), nie von einem fremden Server
+  laden.
+
+Der abgelehnte Film eines Modelabels lief in Bodoni Moda + Inter Tight, während für die Marke
+am selben Tag Cormorant Garamond kursiv, Schibsted Grotesk und JetBrains Mono entschieden
+worden waren. **Ein Markenfilm, der nicht aussieht wie die Marke, ist kein Markenfilm.**
+
 ## 4. Gestaltung
 
 - **Farben aus dem Material**, nicht erfunden: Hintergrund, Text, genau ein Akzent.
@@ -102,6 +160,33 @@ können.**
 | **Formanschluss (Match Cut)** | Zwei Bilder teilen eine Form, eine Linie oder eine Farbfläche an derselben Stelle — der Schnitt liegt genau dort. Ein Ärmel wird zur Hecke, ein heller Fleck bleibt heller Fleck. | Einmal pro Film, als bester Moment |
 | **Maskenwischer** | Eine Kante (`clip-path`) fährt über das Bild und gibt das nächste frei — in der Richtung der vorherigen Bewegung, nie quer dazu. | Beim Wechsel des Themas |
 | **Weiche Blende mit Weiterbewegung** | 0,4–0,6 s Überblendung, **beide** Bilder bewegen sich dabei. Zwei stehende Bilder ineinander zu blenden sieht immer billig aus. | Ruhige Passagen, Abbinder |
+
+### Wie lange ein Übergang dauern darf — in Millisekunden
+
+Maßstab ist der Material-Design-Standard der digitalen Bewegtgestaltung:
+
+| Was sich bewegt | Dauer |
+|---|---|
+| Kleine Elemente (Textzeile, Chip, Zähler) | **150–200 ms** |
+| Große Flächen (Bildwechsel, Wischkante, ganze Szene) | **300–400 ms** |
+| Kamerafahrt (Ken Burns) | über die ganze Einstellung, `ease: none` |
+| **Alles darüber, das keine Kamerafahrt ist** | **ist ein Fehler** |
+
+Kurven, nicht mischen: `power3.out` für Eintritte, `power2.in` für Austritte,
+`power2.inOut` für Bewegung innerhalb des Bildes.
+
+Am 18.09.2026 gemessen an zwei abgelehnten Filmen: Wischkante **1100 ms**, Maskenwischer
+**720 ms**, Texteinblendungen **400–500 ms** — also durchweg das Zwei- bis Dreifache. Die
+Rückmeldung lautete „die Übergänge sind zu langsam", und sie war messbar richtig.
+
+### Drei Schnitte, die teuer aussehen und nichts kosten
+
+- **Cut on Action** — der Schnitt liegt mitten in einer Bewegung, die im nächsten Bild in
+  dieselbe Richtung weiterläuft. Vier Fotos, alle fahren nach links: Die schnelle Folge wirkt
+  treibend statt abgehackt.
+- **Match Cut** — zwei Bilder über eine Gemeinsamkeit verbinden (gleiche Form an gleicher
+  Stelle im Bild). Genau **einer** je Film.
+- **J-Cut** — ein leiser Impuls **3 Frames vor** dem Schnitt zieht das Auge hin.
 
 ### Fünf Regeln, die jeden Übergang besser machen
 
@@ -229,6 +314,38 @@ ein Heiligenschein. Stattdessen:
 Dasselbe gilt für alles Organische: Pflanzen, Fell, Rauch, transparente Stoffe.
 **Freigestellte Produkte sind etwas anderes** — wenn der Shop sie bereits vor weißem
 Grund fotografiert hat, ist die Kante sauber, und man darf sie benutzen.
+
+### Der häufigere Fall: Die Quelle ist **schon** freigestellt
+
+„Nicht freistellen" hilft nicht, wenn das Foto bereits als Freisteller von der Website
+kommt — mit fremder, ausgefranster Kante. Genau das war bei Luviq der Fall, und es wurden
+drei Anläufe darauf verschwendet, den Saum wegzurechnen (Verlauf nach Schwarz, warmer
+Studiogrund per `lighter`, medianfilterter Hintergrund). **Jeder Versuch hat eine neue
+weiche Zone erzeugt, die selbst auffiel** — der Tarnkappen-Fehler aus 4d2.
+
+Drei ehrliche Wege, in dieser Reihenfolge:
+
+1. **Neu maskieren.** `rembg` oder MediaPipe Selfie Segmentation liefern eine saubere
+   Alphamaske. Kante 2 px nach innen versetzen (`erode`), 1,5 px weich. Dann auf einen
+   **gestalteten** Grund setzen — eine Markenfläche mit einem weichen Lichtkegel hinter
+   dem Kopf. **Nicht auf Schwarz:** Auf Schwarz schwimmt die Person, und jeder helle
+   Restsaum leuchtet.
+2. **So eng schneiden, dass die Silhouette an allen vier Seiten aus dem Bild läuft.**
+   Dann existiert keine Kante mehr, die stören könnte.
+3. **Das Foto nicht verwenden.** Die Person anders zeigen: Hände bei der Arbeit, von
+   hinten, in der Werkstatt. Ehrlicher als ein schlechtes Porträt.
+
+### Wie ein Porträt beschnitten wird
+
+- **Augenlinie auf etwa ein Drittel der Bildhöhe von oben.** Das ist die einzige Regel,
+  die immer gilt.
+- **Nie gleichzeitig den Kopf oben anschneiden und die Bildmitte auf den Oberkörper
+  legen.** Genau das ist bei Luviq passiert: Der Ausschnitt betonte den Brustbereich,
+  während der Kopf am oberen Rand abbrach. Bei der Gründerin eines Modelabels ist das
+  kein Gestaltungsfehler mehr, sondern ein Imageschaden.
+- **Mehr Raum vor dem Gesicht als dahinter** (Blickrichtung).
+- **Prüfung vor dem Rendern:** Schnappschuss in voller Auflösung, Kontur um Haare und
+  Schultern auf 300 % vergrößern. Sichtbarer Saum heißt: Weg 2 oder 3.
 
 ## 4c. Der Feinschliff, der aus „gut" „verkaufsfähig" macht
 
