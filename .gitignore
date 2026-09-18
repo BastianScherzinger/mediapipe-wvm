@@ -36,3 +36,7 @@ desktop.ini
 .DS_Store
 .vscode/
 .idea/
+
+# Interne KI-Notizen (aus CLAUDE.md ausgelagert, 18.09.2026) - wie CLAUDE.md nicht veroeffentlichen
+docs/VERLAUF.md
+docs/archiv/
