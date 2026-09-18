@@ -73,6 +73,76 @@ TONFAELLE = [
 DAUERN = (18, 22, 25)
 SPRACHEN = [{"kennung": "de", "name": "Deutsch"}, {"kennung": "en", "name": "Englisch"}]
 
+#: Worum der Film geht. Das ist die Frage, an der der erste Luviq-Film gescheitert ist:
+#: Für einen Modeladen einen Film über *die Webseite* zu machen, ist so falsch wie für
+#: eine Agentur einen Film über *ihre Bilder*. Niemand kauft eine Webseite — gekauft
+#: wird das, was darauf steht.
+FOKUS = [
+    {"kennung": "auto", "name": "Automatisch",
+     "beschreibung": "Das Programm sieht sich das Material an und entscheidet: viele "
+                     "echte Produkt- oder Arbeitsfotos → Marke; eine Seite, die ein "
+                     "Angebot erklärt → Webseite."},
+    {"kennung": "marke", "name": "Marke & Produkte",
+     "beschreibung": "Der Film zeigt die Ware, die Arbeit, die Menschen. Die Bilder "
+                     "tragen ihn, der Text ist kurz. Für Shops, Handwerk, Gastronomie."},
+    {"kennung": "webseite", "name": "Webseite & Angebot",
+     "beschreibung": "Der Film zeigt die Seite selbst: Preise, Ablauf, Oberfläche. "
+                     "Für Dienstleistungen, Software und alles, was erklärt werden muss."},
+]
+
+#: Wörter, die für einen Marken-/Produktfilm sprechen (Verkauf von Dingen und Arbeit).
+_MARKENWORTE = re.compile(
+    r"(shop|warenkorb|kollektion|unikat|produkt|bestell|kaufen|sortiment|galerie|"
+    r"speisekarte|menü|reinigung|montage|sanierung|garten|pflege|handwerk|atelier|"
+    r"werkstatt|lieferung|versand)", re.IGNORECASE)
+
+#: Wörter, die für einen Film über die Seite und ihr Angebot sprechen.
+_ANGEBOTSWORTE = re.compile(
+    r"(webseite|website|agentur|software|saas|beratung|kanzlei|coaching|kurs|abo|"
+    r"tarif|plan|demo|anmelden|registrieren|pauschal|festpreis|pro monat)",
+    re.IGNORECASE)
+
+
+def fokus_bestimmen(bilder: list, texte: dict, gewaehlt: str = "auto") -> dict:
+    """Entscheidet, worum der Film geht — und sagt, warum.
+
+    Die Regel ist bewusst einfach und an Material gebunden, nicht an Meinung: **Wer
+    genug echte Motivbilder hat, bekommt einen Film über die Marke.** Denn ein Film über
+    Kleidungsstücke, in dem keine Kleidungsstücke vorkommen, ist kein guter Film — genau
+    das war der erste Luviq-Versuch (rein typografisch, weil kein einziges Bild vorlag).
+
+    Ohne Bilder bleibt nur die Seite selbst, und dann ist ein Film über Angebot, Preise
+    und Ablauf das Ehrlichere.
+    """
+    if gewaehlt in ("marke", "webseite"):
+        return {"fokus": gewaehlt, "gewaehlt": True,
+                "begruendung": "So ausgewählt."}
+
+    anzahl = len(bilder or [])
+    worte = " ".join(str(w) for w in [
+        texte.get("titel", ""), texte.get("beschreibung", ""),
+        " ".join(texte.get("ueberschriften", []) or []),
+        " ".join(texte.get("knoepfe", []) or []),
+        " ".join(str(b.get("hinweis", "")) for b in (bilder or [])),
+    ])
+    marken_treffer = len(set(m.group(0).lower() for m in _MARKENWORTE.finditer(worte)))
+    angebots_treffer = len(set(m.group(0).lower() for m in _ANGEBOTSWORTE.finditer(worte)))
+
+    if anzahl >= 4 and marken_treffer >= angebots_treffer:
+        return {"fokus": "marke", "gewaehlt": False,
+                "begruendung": f"{anzahl} echte Motivbilder und {marken_treffer} Hinweise "
+                               "auf Ware oder Arbeit — der Film zeigt die Marke."}
+    if anzahl >= 4 and angebots_treffer > marken_treffer + 2:
+        return {"fokus": "webseite", "gewaehlt": False,
+                "begruendung": f"{angebots_treffer} Hinweise auf ein erklärungsbedürftiges "
+                               "Angebot — der Film zeigt die Seite und ihr Angebot."}
+    if anzahl >= 4:
+        return {"fokus": "marke", "gewaehlt": False,
+                "begruendung": f"{anzahl} echte Motivbilder liegen vor — sie tragen den Film."}
+    return {"fokus": "webseite", "gewaehlt": False,
+            "begruendung": f"Nur {anzahl} verwendbare Bild(er) — der Film erzählt die "
+                           "Seite und ihr Angebot, statt Bilder vorzutäuschen."}
+
 #: Dateiendungen, die als Material taugen. Alles andere wird nicht mitgenommen —
 #: ein Projektordner enthält sonst schnell ein Gigabyte Abhängigkeiten.
 _TEXT_ENDUNGEN = {".html", ".htm", ".css", ".js", ".py", ".md", ".txt", ".json", ".json5",
@@ -102,6 +172,7 @@ def katalog() -> dict:
     """Alles, was die Oberfläche für diesen Bereich braucht."""
     return {
         "quellen": QUELLEN,
+        "fokus": FOKUS,
         "tonfaelle": TONFAELLE,
         "dauern": list(DAUERN),
         "sprachen": SPRACHEN,
@@ -164,8 +235,13 @@ def einstellungen_pruefen(roh: dict, Einstellungen):
     if modell not in {m for m, _ in config.BRAG_MODELLE}:
         modell = config.BRAG_MODEL
 
+    fokus = str(roh.get("fokus") or "auto")
+    if fokus not in {f["kennung"] for f in FOKUS}:
+        fokus = "auto"
+
     premium = {
         "quelle": quelle,
+        "fokus": fokus,
         "url": url,
         "projektordner": ordner,
         "thema": thema,
@@ -448,11 +524,48 @@ def _verzeichnis(ordner: Path, grenze: int = 120) -> str:
 
 # ── Der Auftragstext für den Agenten ─────────────────────────────────────────
 
+#: Was ein Film über die **Marke** leisten muss. Der Unterschied zum Webseiten-Film ist
+#: nicht der Ton, sondern das, was auf der Leinwand passiert: Hier sieht man die Ware.
+_FOKUS_MARKE = """\
+## Worum dieser Film geht: die Marke und ihre Ware
+
+Der Film zeigt das, was verkauft wird — die Produkte, die Arbeit, die Menschen. **Nicht
+die Webseite.** Niemand kauft eine Webseite; gekauft wird, was darauf steht.
+
+Dafür gelten drei harte Regeln:
+
+1. **Die Fotos tragen den Film.** Mindestens zwei Drittel der Laufzeit ist echtes
+   Bildmaterial zu sehen, formatfüllend oder als großer Ausschnitt — nicht als Briefmarke
+   neben Text. Jedes gelieferte Foto, das etwas taugt, kommt vor.
+2. **Text ist Beiwerk.** Kurze Zeilen, die das Bild benennen oder zuspitzen. Keine
+   Textwand, keine Aufzählung von Leistungen über dem Bild.
+3. **Nur eine reine Schriftszene** ist erlaubt — der Haken am Anfang oder der Abbinder
+   am Ende, nicht beides ohne Bild.
+
+Ordne jedem Szenenschritt im Storyboard die **Bilddatei** zu, die dort zu sehen ist,
+und sage, wie sie sich bewegt (langsame Fahrt, Zoom, Wechsel). Was das Bild zeigt, sagt
+sein Dateiname — nenne es beim Namen."""
+
+#: Was ein Film über die **Webseite** leisten muss: Angebot, Preis, Ablauf, Oberfläche.
+_FOKUS_WEBSEITE = """\
+## Worum dieser Film geht: die Webseite und ihr Angebot
+
+Der Film zeigt, was die Seite leistet: das Angebot, den Preis, den Ablauf, die
+Oberfläche. Er richtet sich an jemanden, der überlegt, ob er hier anfragt.
+
+- Die stärkste Zahl oder Zusage gehört groß ins Bild (Preis, Dauer, Zusicherung).
+- Wenn Bildschirmaufnahmen der Seite vorliegen, wird die Seite selbst gezeigt — in
+  einem Browserrahmen oder als nachgebauter Ausschnitt.
+- Liegen Fotos vor, stützen sie die Aussage (Gesicht, Arbeit, Ergebnis), tragen den
+  Film aber nicht allein."""
+
 _PROMPT_SYSTEM = """\
 Du bist Creative Director einer Agentur und schreibst den **Auftrag** für einen
 Motion-Designer, der daraus ein 15–25 Sekunden langes Marken-Video baut. Das Video wird
 für vierstellige Beträge verkauft — dein Auftrag muss so konkret sein, dass daraus ohne
 Rückfragen ein fertiger Film entsteht.
+
+{fokus}
 
 Regeln:
 - Schreibe auf Deutsch, in klaren Sätzen, ohne Werbefloskeln.
@@ -471,15 +584,56 @@ Gliederung:
 ## Wer und was
 ## Angle und Haken
 ## Wörtliche Texte (jede Zeile ein Zitat aus dem Material)
-## Zu zeigendes Material (Dateipfade aus dem Verzeichnis)
+## Zu zeigendes Material (jede Bilddatei mit dem, was sie zeigt)
 ## Farben und Schriften
-## Storyboard (Szene, Sekunden, Bild, Text, Ton)
+## Storyboard (Szene, Sekunden, welche Bilddatei, Text, Ton)
 ## Abbinder und Kontakt
 ## Was verboten ist
 """
 
 #: Die Betriebsanweisung — sie steht vor dem Auftrag und regelt Werkzeuge, Pfade und
 #: Abnahme. Der kreative Teil kommt aus dem Master-Prompt, hier steht das Handwerk.
+#: Die Regel, die den zweiten Luviq-Film vom ersten unterscheidet. Der erste zeigte
+#: 22 Sekunden lang Schrift auf schwarzem Grund — für einen Laden, der bemalte
+#: Kleidungsstücke verkauft. Die Bilder lagen nur nicht vor. Jetzt liegen sie vor, und
+#: diese Regel sorgt dafür, dass sie auch benutzt werden.
+_BILDREGEL_MARKE = """\
+### Pflicht: Die Fotos tragen diesen Film
+
+{bilderliste}
+
+- **Sieh dir jedes Foto zuerst an** (Read-Werkzeug auf die Bilddatei). Der Auftrag
+  kennt die Bilder nur dem Dateinamen nach — „photoroom_20260504_222908" sagt nichts.
+  Erst nach dem Ansehen entscheidest du, welches Bild in welche Szene gehört, und
+  tauschst die Zuordnung des Auftrags, wo sie nicht passt. Schreibe in den Plan, was
+  jedes verwendete Bild zeigt.
+- **Unbrauchbares aussortieren:** unscharf, dunkel, Textplakat, zufälliger Ausschnitt.
+  Lieber vier gute Bilder zweimal zeigen als acht, von denen die Hälfte trübe ist.
+- **Mindestens zwei Drittel der Laufzeit ist ein Foto zu sehen** — formatfüllend oder
+  als großer Ausschnitt, mit ruhiger Bewegung (langsamer Zoom, sanfte Fahrt).
+- **Jedes brauchbare Foto kommt vor.** Zeige Ware, Arbeit und Menschen, nicht Symbole.
+- Text liegt ÜBER dem Bild oder in einem schmalen Band daneben, nie statt des Bildes.
+  Höchstens EINE reine Schriftszene (Haken oder Abbinder).
+- Bilder werden mit `<img>` eingebunden und liegen im `assets/`-Ordner der Komposition;
+  kopiere sie dorthin. Für Bewegung: Hülle mit `overflow: hidden`, das Bild darin per
+  GSAP `scale`/`x`/`y` — niemals `width`/`height` animieren.
+- Achte auf Lesbarkeit über dem Bild: dunkler Verlauf oder Fläche unter dem Text, sonst
+  meldet `check` zu Recht einen Kontrastfehler.
+- Schneide Fotos formatgerecht (`object-fit: cover`): im Hochformat hochkant, im
+  Querformat quer — ein verzerrtes Produktfoto ist schlimmer als keines."""
+
+_BILDREGEL_WEBSEITE = """\
+### Bildmaterial
+
+{bilderliste}
+
+- Sieh dir vorhandene Fotos mit dem Read-Werkzeug an, bevor du eines einplanst — der
+  Dateiname sagt oft nichts.
+- Vorhandene Fotos und Bildschirmaufnahmen stützen die Aussage: Gesicht, Arbeit,
+  Ergebnis, die Seite selbst in einem Browserrahmen.
+- Der Film trägt sich über Aussage, Zahl und Ablauf — er braucht keine Bilderflut, darf
+  aber auch nicht 20 Sekunden reine Schrift sein, wenn Bilder vorliegen."""
+
 _AGENT_VORSPANN = """\
 Du baust einen verkaufsfähigen Marken-Film in ZWEI Formaten. Arbeite eigenständig bis
 zum fertigen Ergebnis und stelle keine Rückfragen.
@@ -500,6 +654,8 @@ zum fertigen Ergebnis und stelle keine Rückfragen.
 Alles Material liegt in diesem Arbeitsordner:
 {materialuebersicht}
 
+{bildregel}
+
 ## Zu erzeugen
 - `brag-output/composition/index.html` — Querformat 1920×1080
 - `brag-output/composition-hoch/index.html` — Hochformat 1080×1920
@@ -508,10 +664,32 @@ Alles Material liegt in diesem Arbeitsordner:
 - Gerendert: `brag-output/brag.mp4` (quer) und `brag-output/brag-hochformat.mp4` (hoch),
   beide mit `npx hyperframes render --quality high`.
 
+## Falls schon etwas dasteht
+Liegt im Arbeitsordner bereits eine angefangene Komposition (`brag-output/`), ist das ein
+**wiederholter Lauf**: Sieh sie dir an und **baue darauf auf**, statt neu anzufangen.
+Aufbereitete Bilder in `assets/`, ein vorhandener Plan und geprüfte Kompositionen sind
+bezahlte Arbeit — was fehlt, ist meist nur der Render.
+
+## Zeit — die Reihenfolge, die zählt
+Für den ganzen Lauf stehen **{minuten} Minuten** zur Verfügung. Danach wird abgebrochen,
+egal wie weit du bist.
+
+- Nach spätestens **der Hälfte der Zeit** müssen beide Kompositionen stehen und die
+  Renders laufen. Rendern dauert auf diesem Rechner 4–8 Minuten je Fassung.
+- **Bildaufbereitung ist kein Selbstzweck.** Freistellen, Retusche und Feinschliff sind
+  Kür: Gelingt eine Aufbereitung nicht in zwei, drei Anläufen, nimm das Originalfoto und
+  bette es mit Verlauf oder Vignette ein. Ein gerenderter Film mit einer kleinen
+  Unsauberkeit ist unendlich viel mehr wert als ein perfekter, der nie fertig wird.
+- Ist noch Zeit übrig, wenn beide Filme liegen: dann bessere nach und rendere erneut.
+
 ## Abnahme (nicht abkürzen)
 - `npx hyperframes check` muss in BEIDEN Kompositionsordnern ohne Fehler durchlaufen.
 - Vor dem Rendern `npx hyperframes snapshot --at <Zeiten>` laufen lassen und die
   Kontaktbogen-Datei mit dem Read-Werkzeug **ansehen**. Was schief steht, wird korrigiert.
+- **Lies dabei jedes Wort im Bild.** Kein Wort darf doppelt stehen (das passiert bei
+  Lauftext-Bändern mit dupliziertem Inhalt), keines abgeschnitten oder mitten im Wort
+  umgebrochen sein, keines ohne Verlauf auf hellem Bild liegen. Ein solcher Fehler
+  macht den Film unverkäuflich — er fällt jedem Kunden sofort auf.
 - Beide MP4 müssen existieren, 15–25 s lang sein und eine Tonspur haben.
 - Schreibe zum Schluss `brag-output/share-copy.txt` (ein bis drei Sätze zum Posten).
 
@@ -526,7 +704,8 @@ Alles Material liegt in diesem Arbeitsordner:
 """
 
 
-def master_prompt_schreiben(premium: dict, material: dict, ordner: Path) -> str:
+def master_prompt_schreiben(premium: dict, material: dict, ordner: Path,
+                            arbeit: "Path | None" = None) -> str:
     """Lässt Claude aus Antworten und Material den Auftrag schreiben."""
     tonfall = next((t for t in TONFAELLE if t["kennung"] == premium["tonfall"]), TONFAELLE[0])
     teile = [
@@ -555,12 +734,16 @@ def master_prompt_schreiben(premium: dict, material: dict, ordner: Path) -> str:
         gelesen = json.dumps(material["texte"], ensure_ascii=False)[:6000]
         teile.append(f"Ausgelesene Inhalte der Webseite (JSON): {gelesen}")
 
+    teile.append(bilderliste(material.get("bilder") or [], arbeit or ordner))
     teile.append("Verzeichnis des Materials im Arbeitsordner:\n" + material["verzeichnis"])
     if material.get("leseproben"):
         teile.append("Ausschnitte aus den wichtigsten Dateien:\n" + material["leseproben"])
 
+    fokus = (material.get("fokus") or {}).get("fokus", "webseite")
+    system = _PROMPT_SYSTEM.format(
+        fokus=_FOKUS_MARKE if fokus == "marke" else _FOKUS_WEBSEITE)
     auftrag = "\n\n".join(teile)
-    antwort = llm.erzeuge(_PROMPT_SYSTEM, auftrag, zeitlimit=300)
+    antwort = llm.erzeuge(system, auftrag, zeitlimit=300)
     text = antwort.text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\n|\n```$", "", text).strip()
@@ -568,6 +751,31 @@ def master_prompt_schreiben(premium: dict, material: dict, ordner: Path) -> str:
     logbook.info(QUELLE, f"Auftrag geschrieben ({len(text)} Zeichen, "
                          f"{antwort.anzeigename}).")
     return text
+
+
+def bilderliste(bilder: list, arbeit: Path) -> str:
+    """Sagt dem Auftragschreiber, welche Bilder es gibt und was sie zeigen.
+
+    Der Dateiname ist die einzige Beschreibung, die ein Foto von einer fremden Seite
+    mitbringt — `heckenschnitt.jpg`, `galerie_04.jpg`, `Photoroom_20260504_222908.jpg`.
+    Er wird deshalb mitgegeben, samt Maßen: Ein hochkantes Produktfoto trägt eine
+    9:16-Szene, ein breites Landschaftsbild nicht.
+    """
+    if not bilder:
+        return ("Bildmaterial: KEINES. Es liegt kein einziges verwendbares Foto vor — "
+                "erfinde keines und behaupte keine Produktansicht, die es nicht gibt.")
+    zeilen = [f"Bildmaterial: {len(bilder)} Foto(s) im Arbeitsordner. "
+              "Sie sind das Material des Films:"]
+    for bild in bilder:
+        try:
+            pfad = Path(bild["datei"]).relative_to(arbeit).as_posix()
+        except (ValueError, KeyError):
+            pfad = Path(str(bild.get("datei", ""))).name
+        hochkant = "hochkant" if bild["hoehe"] > bild["breite"] * 1.1 else (
+            "quer" if bild["breite"] > bild["hoehe"] * 1.1 else "quadratisch")
+        zeilen.append(f"  {pfad} — „{bild['hinweis']}“, "
+                      f"{bild['breite']}×{bild['hoehe']} ({hochkant})")
+    return "\n".join(zeilen)
 
 
 def _leseproben(ordner: Path, grenze: int = 6) -> str:
@@ -631,7 +839,7 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
     jobstore.aktualisieren(auftrag_id, block="prompt")
     _block(auftrag_id, "prompt", "aktiv", "Claude schreibt den Auftrag")
     _fortschritt(auftrag_id, "prompt", 0.2, 60, "Material wird gelesen")
-    master = master_prompt_schreiben(p, material, ordner)
+    master = master_prompt_schreiben(p, material, ordner, arbeit)
     jobstore.aktualisieren(auftrag_id, drehbuch={"master_prompt": master, "titel": titel})
     _fortschritt(auftrag_id, "prompt", 1.0, 0, "fertig")
     _block(auftrag_id, "prompt", "fertig", f"{len(master)} Zeichen",
@@ -647,8 +855,14 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
         melden=lambda text: logbook.info(QUELLE, text, job=auftrag_id))
     shutil.copytree(config.BASE_DIR / "bragvorlage", arbeit / "rezept", dirs_exist_ok=True)
 
-    vorspann = _AGENT_VORSPANN.format(materialuebersicht=material["verzeichnis"],
-                                      auftrag=master)
+    fokus = (material.get("fokus") or {}).get("fokus", "webseite")
+    vorlage = _BILDREGEL_MARKE if fokus == "marke" else _BILDREGEL_WEBSEITE
+    vorspann = _AGENT_VORSPANN.format(
+        minuten=config.BRAG_ZEITLIMIT // 60,
+        materialuebersicht=material["verzeichnis"],
+        bildregel=vorlage.format(
+            bilderliste=bilderliste(material.get("bilder") or [], arbeit)),
+        auftrag=master)
     stand = {"block": "bauen", "schritte": 0, "begonnen": time.monotonic()}
 
     def agentenmeldung(text: str, art: str) -> None:
@@ -735,35 +949,122 @@ def _aufnehmen_mit_grenze(auftrag_id: str, url: str, ordner: Path,
     return None
 
 
+def _bilder_von_der_seite(auftrag_id: str, url: str, ziel: Path,
+                          abbruch: threading.Event) -> list[dict]:
+    """Holt die Fotos der Seite — ohne Browser, in Sekunden.
+
+    Das ist die Lehre aus dem ersten Luviq-Film: Er wurde rein typografisch, weil kein
+    einziges Produktfoto vorlag — die Browser-Aufnahme war in ihre Zeitgrenze gelaufen.
+    Dabei stehen die Bilder im HTML und sind in wenigen Sekunden geladen. Für einen
+    Modeladen sind sie *der* Film.
+
+    Neben der Startseite werden bis zu drei Unterseiten angesehen, hinter denen
+    erfahrungsgemäß die Ware liegt: Shop, Produkte, Galerie, Leistungen.
+    """
+    try:
+        seite = webaufnahme.seite_lesen(url)
+    except Exception as fehler:
+        logbook.warnung(QUELLE, f"Die Seite ließ sich nicht auslesen: "
+                                f"{type(fehler).__name__}", job=auftrag_id)
+        return []
+
+    adressen = list(seite.get("bilder") or [])
+    for link in (seite.get("links") or [])[:3]:
+        _pruefe_abbruch(abbruch)
+        try:
+            weitere = webaufnahme.seite_lesen(link).get("bilder") or []
+        except Exception:
+            continue
+        adressen += [b for b in weitere if b not in adressen]
+        logbook.debug(QUELLE, f"Unterseite gelesen: {link[:90]}", job=auftrag_id)
+
+    bilder = webaufnahme.motivbilder_laden(
+        adressen, ziel, hoechstens=12, abbruch=abbruch,
+        melden=lambda da, von: _fortschritt(auftrag_id, "material",
+                                            0.2 + 0.3 * da / max(1, von), 0,
+                                            f"{da} Bild(er) geladen"))
+    if bilder:
+        logbook.erfolg(QUELLE, f"{len(bilder)} Motivbilder von der Seite geladen: "
+                               + ", ".join(b["hinweis"][:24] for b in bilder[:6]),
+                       job=auftrag_id)
+    else:
+        logbook.warnung(QUELLE, "Auf der Seite waren keine brauchbaren Fotos zu finden.",
+                        job=auftrag_id)
+    return bilder
+
+
+def _bilder_im_ordner(ordner: Path, hoechstens: int = 14) -> list[dict]:
+    """Die größten Bilder eines Ordners — dieselbe Rolle wie die Fotos einer Seite."""
+    from PIL import Image
+
+    gefunden = []
+    for pfad in sorted(Path(ordner).rglob("*")):
+        if pfad.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".avif"}:
+            continue
+        try:
+            with Image.open(pfad) as bild:
+                breite, hoehe = bild.width, bild.height
+        except Exception:
+            continue
+        if breite < 400 or hoehe < 400 or not (0.3 < breite / hoehe < 3.2):
+            continue
+        if webaufnahme._KEIN_MOTIV.search(pfad.name):
+            continue
+        gefunden.append({"datei": pfad, "quelle": str(pfad), "breite": breite,
+                         "hoehe": hoehe, "hinweis": pfad.stem[:60]})
+    gefunden.sort(key=lambda b: b["breite"] * b["hoehe"], reverse=True)
+    return gefunden[:hoechstens]
+
+
 def _material_sammeln(auftrag_id: str, p: dict, arbeit: Path,
                       abbruch: threading.Event) -> dict:
     """Legt alles Material in den Arbeitsordner und beschreibt es fürs Prompting."""
-    material = {"texte": {}, "kurz": "", "verzeichnis": "", "leseproben": ""}
+    material = {"texte": {}, "kurz": "", "verzeichnis": "", "leseproben": "",
+                "bilder": [], "fokus": {}}
     quelle = p.get("quelle")
 
     hochgeladen = _material_uebernehmen(p.get("korb", ""), arbeit / "material")
     teile = [f"{hochgeladen} hochgeladene Datei(en)"] if hochgeladen else []
+    bilder: list[dict] = _bilder_im_ordner(arbeit / "material", 8) if hochgeladen else []
 
     if quelle == "webseite":
-        _fortschritt(auftrag_id, "material", 0.15, 45, "Die Seite wird fotografiert")
-        # Die Texte der Seite sind das Wichtigste und in Sekunden da; die Aufnahmen
-        # brauchen einen Browser und können auf einem schwachen Rechner Minuten dauern.
-        # Deshalb zuerst die Texte holen — dann steht das Material auch dann, wenn die
-        # Aufnahme in ihre Zeitgrenze läuft.
+        # Reihenfolge nach Wert je Sekunde: Texte (sofort) → Fotos (Sekunden) →
+        # Bildschirmaufnahmen (Minuten, mit Frist). Ein Film überlebt fehlende
+        # Aufnahmen; ohne Fotos wird er beliebig.
+        _fortschritt(auftrag_id, "material", 0.1, 60, "Die Seite wird gelesen")
         material["texte"] = {k: v for k, v in webaufnahme.adresse_pruefen(p["url"]).items()
                              if k in ("titel", "beschreibung", "marke", "farbe",
                                       "ueberschriften", "knoepfe")}
-        aufnahme = _aufnehmen_mit_grenze(auftrag_id, p["url"], arbeit / "aufnahme", abbruch)
+        _fortschritt(auftrag_id, "material", 0.2, 45, "Fotos der Seite werden geladen")
+        bilder += _bilder_von_der_seite(auftrag_id, p["url"], arbeit / "bilder", abbruch)
+        if bilder:
+            teile.append(f"{len(bilder)} Foto(s) von der Seite")
+            logbook.ereignis("vorschau", {"block": "material",
+                                          "datei": library.web_pfad(bilder[0]["datei"])},
+                             job=auftrag_id)
+
+        # Die Bildschirmaufnahme kostet Minuten. Sie lohnt sich, wenn der Film die
+        # *Seite* zeigen soll — für einen Marken-Film mit eigenen Fotos ist sie
+        # entbehrlich, und sieben Minuten Wartezeit für ein Bild, das nicht vorkommt,
+        # sind schlicht verschenkt.
+        vorab = fokus_bestimmen(bilder, material["texte"], p.get("fokus", "auto"))
+        if vorab["fokus"] == "marke" and len(bilder) >= 4:
+            logbook.info(QUELLE, "Genug eigene Fotos — auf die Bildschirmaufnahme wird "
+                                 "verzichtet (sie käme im Marken-Film nicht vor).",
+                         job=auftrag_id)
+            aufnahme = None
+            teile.append("Bildschirmaufnahme nicht nötig")
+        else:
+            _fortschritt(auftrag_id, "material", 0.55, 0, "Die Seite wird fotografiert")
+            aufnahme = _aufnehmen_mit_grenze(auftrag_id, p["url"], arbeit / "aufnahme",
+                                             abbruch)
         if aufnahme is not None:
             material["texte"] = aufnahme.texte or material["texte"]
-            logbook.ereignis("vorschau", {"block": "material",
-                                          "datei": library.web_pfad(aufnahme.start_mobil)},
-                             job=auftrag_id)
-            teile.append(f"Aufnahmen von {aufnahme.host}")
+            teile.append(f"Bildschirmaufnahmen von {aufnahme.host}")
             logbook.info(QUELLE, f"Webseite aufgenommen: {aufnahme.url} ({aufnahme.weg})",
                          job=auftrag_id)
-        else:
-            teile.append("Texte der Webseite (ohne Aufnahmen)")
+        elif "Bildschirmaufnahme nicht nötig" not in teile:
+            teile.append("keine Bildschirmaufnahmen")
 
     elif quelle == "ordner":
         _fortschritt(auftrag_id, "material", 0.3, 30, "Projektordner wird gelesen")
@@ -771,10 +1072,16 @@ def _material_sammeln(auftrag_id: str, p: dict, arbeit: Path,
         teile.append(f"{gezaehlt['texte']} Textdatei(en), {gezaehlt['bilder']} Bild(er), "
                      f"{gezaehlt['schriften']} Schrift(en)")
         material["leseproben"] = _leseproben(arbeit / "quelle")
+        bilder += _bilder_im_ordner(arbeit / "quelle")
         logbook.info(QUELLE, f"Projektordner übernommen: {teile[-1]}", job=auftrag_id)
 
     else:
         teile.append("Beschreibung und hochgeladenes Material")
+
+    material["bilder"] = bilder
+    material["fokus"] = fokus_bestimmen(bilder, material["texte"], p.get("fokus", "auto"))
+    logbook.info(QUELLE, f"Fokus: {material['fokus']['fokus']} — "
+                         f"{material['fokus']['begruendung']}", job=auftrag_id)
 
     _fortschritt(auftrag_id, "material", 0.95, 0, "Verzeichnis wird erstellt")
     material["verzeichnis"] = _verzeichnis(arbeit)

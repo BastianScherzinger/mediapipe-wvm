@@ -19,6 +19,7 @@
   const zustand = {
     katalog: null,
     quelle: "webseite",
+    fokus: "auto",
     tonfall: "polished",
     dauer: 22,
     korb: "",
@@ -38,6 +39,7 @@
     if (!zustand.katalog) return;
 
     quellenBauen();
+    fokusBauen();
     tonfaelleBauen();
     dauerBauen();
     modelleBauen();
@@ -83,6 +85,27 @@
         el("span", { klasse: "stil-name", text: q.name }),
         el("span", { klasse: "stil-text", text: q.beschreibung }),
       ])));
+  }
+
+  function fokusBauen() {
+    $("#pr-fokus").replaceChildren(...(zustand.katalog.fokus || []).map((f) =>
+      el("button", {
+        klasse: "stil", type: "button", role: "radio", "aria-checked": "false",
+        daten: { fokus: f.kennung }, onclick: () => fokusSetzen(f.kennung),
+      }, [
+        el("span", { klasse: "stil-name", text: f.name }),
+        el("span", { klasse: "stil-text", text: f.beschreibung }),
+      ])));
+  }
+
+  function fokusSetzen(kennung) {
+    zustand.fokus = kennung;
+    for (const knopf of $$("#pr-fokus .stil")) {
+      const an = knopf.dataset.fokus === kennung;
+      knopf.classList.toggle("ist-an", an);
+      knopf.setAttribute("aria-checked", an ? "true" : "false");
+    }
+    merken();
   }
 
   function tonfaelleBauen() {
@@ -326,6 +349,7 @@
       cta: $("#pr-cta").value.trim(),
       kontakt: $("#pr-kontakt").value.trim(),
       wunsch: $("#pr-wunsch").value.trim(),
+      fokus: zustand.fokus,
       tonfall: zustand.tonfall,
       dauer: zustand.dauer,
       sprache: $("#pr-sprache").value,
@@ -387,7 +411,8 @@
   function merken() {
     try {
       localStorage.setItem(SPEICHER, JSON.stringify({
-        quelle: zustand.quelle, tonfall: zustand.tonfall, dauer: zustand.dauer,
+        quelle: zustand.quelle, fokus: zustand.fokus,
+        tonfall: zustand.tonfall, dauer: zustand.dauer,
         korb: zustand.korb, material: zustand.material,
         url: $("#pr-url").value, ordner: $("#pr-ordner").value,
         thema: $("#pr-thema").value, kunde: $("#pr-kunde").value,
@@ -420,6 +445,7 @@
       materialZeigen();
     }
     quelleSetzen(gemerkt?.quelle || "webseite");
+    fokusSetzen(gemerkt?.fokus || "auto");
     tonfallSetzen(gemerkt?.tonfall || "polished");
     dauerSetzen(gemerkt?.dauer || zustand.katalog.dauern[1] || 22);
   }

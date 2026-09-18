@@ -23,6 +23,7 @@ auf einen Arbeitsrechner.
 """
 from __future__ import annotations
 
+import hashlib
 import html
 import ipaddress
 import re
@@ -281,6 +282,145 @@ def adresse_pruefen(roh: str) -> dict:
         "dauer_ms": int((time.monotonic() - begonnen) * 1000),
         "status": antwort.status_code,
     }
+
+
+#: Links, hinter denen erfahrungsgemäß die guten Bilder liegen: der Shop, die Galerie,
+#: die Leistungsseiten. Ein Film lebt von Produkten und Arbeit, nicht vom Impressum.
+_BILDSEITEN = re.compile(
+    r"(shop|produkt|product|kollektion|collection|galerie|gallery|leistung|service|"
+    r"referenz|projekt|portfolio|angebot|sortiment|unikat|katalog)", re.IGNORECASE)
+
+#: Endungen, hinter denen keine Seite steckt, sondern eine Datei.
+_KEINE_SEITE = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".ico", ".css", ".js",
+                ".pdf", ".zip", ".mp4", ".mp3", ".woff", ".woff2", ".ttf", ".xml", ".json"}
+
+#: Bilder, die kein Motiv sind — Logos, Symbole, Zahlungsarten, Platzhalter.
+_KEIN_MOTIV = re.compile(
+    r"(logo|icon|favicon|sprite|badge|siegel|platzhalter|placeholder|avatar|"
+    r"pixel|spinner|loader|arrow|pfeil|paypal|klarna|visa|mastercard)", re.IGNORECASE)
+
+
+def seite_lesen(url: str) -> dict:
+    """Holt eine Seite und gibt zurück, was für ein Video zählt: Bilder und Links.
+
+    Bewusst ohne Browser: Das dauert Sekunden statt Minuten und liefert bei fast jeder
+    Seite genau das Material, an dem ein Film hängt — die Produktfotos. Die Aufnahme mit
+    Browser bleibt daneben bestehen, sie zeigt das Aussehen der Seite.
+    """
+    antwort = sicher_abrufen(url, kopf={"User-Agent": _UA_DESKTOP,
+                                        "Accept-Language": "de-DE,de;q=0.9,en;q=0.6"})
+    if antwort.status_code >= 400 or "html" not in \
+            antwort.headers.get("content-type", "").lower():
+        return {"url": url, "bilder": [], "links": []}
+
+    endadresse = str(antwort.url)
+    leser = _Leser(endadresse)
+    try:
+        leser.feed(antwort.text[:1_500_000])
+    except Exception:
+        pass
+
+    eigener = (antwort.url.host or "").removeprefix("www.")
+    links: list[str] = []
+    for treffer in re.finditer(r'href=["\']([^"\'#?]+)', antwort.text[:1_500_000]):
+        ziel = urllib.parse.urljoin(endadresse, treffer.group(1))
+        teile = urllib.parse.urlsplit(ziel)
+        gastgeber = (teile.hostname or "").removeprefix("www.")
+        # Nur echte Seiten, keine Dateien: Ein Pfad wie `/static/shop1/bild.ico` enthält
+        # das Wort „shop“ und wäre sonst als Shopseite durchgegangen.
+        if (gastgeber != eigener or ziel in links
+                or Path(teile.path).suffix.lower() in _KEINE_SEITE
+                or re.search(r"/(static|media|assets|files)/", teile.path, re.IGNORECASE)):
+            continue
+        if _BILDSEITEN.search(teile.path):
+            links.append(ziel)
+
+    return {"url": endadresse, "bilder": leser.bilder[:60], "links": links[:12]}
+
+
+def motivbilder_laden(adressen: list[str], ordner: Path, *, hoechstens: int = 12,
+                      abbruch=None, melden=None) -> list[dict]:
+    """Lädt echte Motivbilder — Produkte, Räume, Menschen, Arbeit.
+
+    Anders als `_bilder_holen` (vier Stück fürs Werbevideo) sammelt diese Funktion das
+    Bildmaterial für einen ganzen Film und sagt zu jedem Bild, was es ist: Der Dateiname
+    der Quelle (`heckenschnitt.jpg`, `produkte/IMG_4376`) ist die einzige Beschreibung,
+    die es gibt — und sie ist erstaunlich verlässlich.
+
+    Aussortiert werden Logos, Symbole und alles unter 400 Pixel: Ein Film, der ein
+    Zahlungs-Symbol formatfüllend zeigt, ist schlechter als einer ohne Bilder.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    ordner = Path(ordner)
+    ordner.mkdir(parents=True, exist_ok=True)
+    gefunden: list[dict] = []
+    gesehen: set[str] = set()
+    # Dieselbe Aufnahme taucht auf einer Shopseite mehrfach auf — als Kachel, im
+    # Schaufenster, auf der Produktseite, jeweils mit anderer Größenangabe in der
+    # Adresse. Ohne diesen Vergleich läge ein Film aus fünf Bildern nachher mit drei
+    # Kopien desselben Kleidungsstücks da.
+    inhalte: set[str] = set()
+    namen: set[str] = set()
+
+    for adresse in adressen:
+        if len(gefunden) >= hoechstens:
+            break
+        if abbruch is not None and abbruch.is_set():
+            break
+        adresse = str(adresse)
+        if not adresse.startswith(("http://", "https://")) or adresse in gesehen:
+            continue
+        gesehen.add(adresse)
+        kern = urllib.parse.urlsplit(adresse).path.rsplit("/", 1)[-1]
+        if _KEIN_MOTIV.search(adresse):
+            continue
+        # Bilddienste liefern dasselbe Foto unter mehreren Adressen aus, die sich nur in
+        # der Größenangabe unterscheiden (`.../w_800/...` und `.../w_1200/...`). Der
+        # Dateiname am Ende bleibt derselbe — er ist das verlässlichere Kennzeichen als
+        # die Bytes, die dann verschieden sind.
+        stamm = re.sub(r"\.[a-f0-9]{8,}$", "", Path(kern).stem).lower()
+        if stamm and stamm in namen:
+            continue
+        try:
+            antwort = sicher_abrufen(adresse, kopf={"User-Agent": _UA_DESKTOP},
+                                     zeitlimit=15)
+            if antwort.status_code >= 400 or len(antwort.content) < 12000:
+                continue
+            if not antwort.headers.get("content-type", "").lower().startswith("image/"):
+                continue
+            fingerabdruck = hashlib.sha1(antwort.content).hexdigest()
+            if fingerabdruck in inhalte:
+                continue
+            with Image.open(BytesIO(antwort.content)) as bild:
+                if bild.width < 400 or bild.height < 400:
+                    continue
+                # Sehr breite oder sehr schmale Bilder sind meist Banner und Trennlinien.
+                seite = bild.width / bild.height
+                if seite > 3.2 or seite < 0.3:
+                    continue
+                name = re.sub(r"[^\w.-]", "_", kern) or f"bild_{len(gefunden) + 1}"
+                name = Path(name).stem[:48] + ".jpg"
+                ziel = ordner / f"{len(gefunden) + 1:02d}_{name}"
+                fassung = bild.convert("RGB")
+                fassung.thumbnail((1800, 1800))
+                fassung.save(ziel, "JPEG", quality=88)
+            inhalte.add(fingerabdruck)
+            namen.add(stamm)
+            gefunden.append({"datei": ziel, "quelle": adresse,
+                             "breite": fassung.width, "hoehe": fassung.height,
+                             # Der Name ohne den Fingerabdruck, den Django & Co.
+                             # anhängen: „heckenschnitt“ statt
+                             # „heckenschnitt.8eaad752af22“. Das ist die einzige
+                             # Beschreibung des Bildes, die es gibt — sie soll lesbar sein.
+                             "hinweis": stamm[:60] or Path(kern).stem[:60]})
+            if melden:
+                melden(len(gefunden), hoechstens)
+        except Exception:
+            continue
+    return gefunden
 
 
 # ── Aufnahmen ────────────────────────────────────────────────────────────────

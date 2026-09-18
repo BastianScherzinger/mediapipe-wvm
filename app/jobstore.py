@@ -45,6 +45,22 @@ BLOCKNAMEN = {
 _sperre = threading.Lock()
 
 
+def _programm_laeuft_bereits() -> bool:
+    """Hört schon ein anderer Programmlauf auf dem Port?
+
+    Das ist die einzige verlässliche Auskunft darüber, ob gerade ein Auftrag bearbeitet
+    wird: Der Auftrag lebt im Prozess des Servers, nicht in der Datenbank.
+    """
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as verbindung:
+        verbindung.settimeout(0.4)
+        try:
+            return verbindung.connect_ex((config.HOST, config.PORT)) == 0
+        except OSError:
+            return False
+
+
 @dataclass
 class Auftrag:
     """Ein Videoauftrag in allen seinen Phasen."""
@@ -107,7 +123,15 @@ def einrichten() -> None:
         verbindung.execute(
             "CREATE INDEX IF NOT EXISTS idx_angelegt ON auftraege(angelegt DESC)")
 
-        # Leichen aus einem früheren Programmlauf.
+        # Leichen aus einem früheren Programmlauf — aber nur, wenn wirklich keiner mehr
+        # läuft. Sonst passiert, was am 18.09.2026 passiert ist: Ein zweiter Prozess
+        # importiert das Paket (ein Testlauf, ein Prüfbefehl, ein zweiter Start), und
+        # dieser Import erklärt den Auftrag, der nebenan gerade seit einer Stunde
+        # rechnet, für abgebrochen. Der Faden läuft weiter, die Anzeige sagt das
+        # Gegenteil — der schlimmste aller Zustände.
+        if _programm_laeuft_bereits():
+            return
+
         gefunden = verbindung.execute(
             "SELECT id FROM auftraege WHERE zustand IN (?, ?)", (WARTEND, LAEUFT)
         ).fetchall()

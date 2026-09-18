@@ -120,7 +120,7 @@ BRAG_MODELLE: tuple[tuple[str, str], ...] = (
 #: 10–20 Minuten fertig; auf diesem Notebook (Intel-Grafik) brauchte der erste Lauf für
 #: zwei Formate, Prüfläufe und zwei Renderdurchgänge über 40 Minuten. Die Grenze ist
 #: deshalb großzügig — sie soll Hängengebliebenes abfangen, nicht ehrliche Arbeit.
-BRAG_ZEITLIMIT: int = _int("MPW_BRAG_ZEITLIMIT", 5400, 600, 14400)
+BRAG_ZEITLIMIT: int = _int("MPW_BRAG_ZEITLIMIT", 7200, 600, 14400)
 #: Wie lange auf die Aufnahmen einer fremden Webseite gewartet wird. Danach
 #: entsteht der Film aus den Texten der Seite — Stillstand ist die schlechtere
 #: Antwort als ein Film ohne Bildschirmfotos.

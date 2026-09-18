@@ -25,6 +25,34 @@ wäre.
 Kundenstimmen, die nicht im Material stehen. Ein erfundener Beleg ist kein Stilfehler,
 sondern ein Rückrufgrund — und bei Werbung abmahnfähig.
 
+## 1b. Die erste Frage: Marke oder Webseite?
+
+Bevor eine Sekunde geplant wird, muss klar sein, **worüber** der Film geht. Das ist
+nicht dasselbe wie der Tonfall — es entscheidet, was auf der Leinwand passiert.
+
+| | **Marken-Film** | **Webseiten-Film** |
+|---|---|---|
+| Für | Shops, Handwerk, Gastronomie, alles mit Ware und Arbeit | Dienstleistung, Software, alles Erklärungsbedürftige |
+| Held | die Produkte, die Arbeit, die Menschen | das Angebot: Preis, Ablauf, Zusage, Oberfläche |
+| Bild | echte Fotos, formatfüllend, ruhig bewegt | Seitenausschnitte, Karten, große Zahlen |
+| Text | wenige Worte über dem Bild | die tragende Aussage in großer Type |
+
+**Ein Modeladen bekommt keinen Film über seine Webseite.** Niemand kauft eine
+Webseite; gekauft wird, was darauf steht. Der erste Luviq-Film hat genau diesen Fehler
+gemacht: 22 Sekunden Schrift auf schwarzem Grund für einen Laden, der handbemalte
+Einzelstücke verkauft — kein einziges Kleidungsstück war zu sehen. Er war handwerklich
+sauber und trotzdem der falsche Film.
+
+**Wenn Fotos vorliegen, tragen sie den Film.** Zwei Drittel der Laufzeit Bild,
+formatfüllend, mit langsamer Bewegung; Text liegt darüber, nicht an seiner Stelle.
+Fotos schneidet man mit `object-fit: cover` formatgerecht — ein verzerrtes Produktfoto
+ist schlimmer als keines. Unter Text auf Bild gehört ein dunkler Verlauf, sonst ist er
+nicht lesbar (und `check` meldet es zu Recht).
+
+**Wenn keine Fotos vorliegen**, ist ein typografischer Film richtig — aber dann gehört
+in den Auftrag der Satz, warum es keine gibt. Erfundene Produktansichten, Stockfotos
+oder KI-Bilder von fremder Ware sind in beiden Fällen verboten.
+
 ## 2. Aufbau, der trägt (15–25 s)
 
 ```
@@ -81,6 +109,21 @@ Text, gleicher Musik und gleichen Zeiten. Im Hochformat:
 - Bildstapel kaskadieren nach unten statt nach rechts.
 - Ränder 90 px, nichts näher als 60 px an den Rand — sonst liegt es unter der TikTok-Bedienleiste.
 
+## 6b. Zeit einteilen — der häufigste Totalausfall
+
+Ein Film, der nie gerendert wird, ist kein Film. Der erste Luviq-Durchgang ist genau so
+gestorben: vierzig Minuten Bildfreistellung, dann Zeitlimit — beide Kompositionen fertig,
+kein einziges Video.
+
+- **Zur Hälfte der verfügbaren Zeit müssen die Renders laufen.** Rendern dauert 4–8
+  Minuten je Fassung; was danach kommt, ist Zugabe.
+- **Bildaufbereitung ist Kür.** Freistellen, Retusche, Kantenglättung: Gelingt es nicht
+  in zwei, drei Anläufen, nimm das Originalfoto und bette es mit Verlauf, Vignette oder
+  Maske ein. Ein sichtbar ausgeschnittenes Haar ist ein Schönheitsfehler; ein fehlender
+  Film ist ein Totalausfall.
+- **Erst rendern, dann verbessern.** Liegen beide Filme, ist alles Weitere risikolos —
+  und man kann erneut rendern, wenn Zeit bleibt.
+
 ## 7. Ablauf des Baus
 
 1. Material sichten (`material/`, `aufnahme/`, Projektordner) — echte Texte, Farben, Bilder ziehen.
@@ -102,6 +145,20 @@ Text, gleicher Musik und gleichen Zeiten. Im Hochformat:
 | Karte zu weit unten im Hochformat | `panel_out_of_canvas` | Alles bis 1.860 px halten |
 | `data-duration` länger als die Tondatei | `clip_media_fit`-Warnung | Länge der Datei eintragen |
 | Nur `check` bestanden | Sagt nichts über Schönheit | Immer Snapshots ansehen |
+| **Lauftext/Marquee mit verdoppeltem Text** | Im Standbild steht „LUVIQLU VIQ" oder „JETZT ENTDECKENJETZT ENTDECKEN" — für ein Video, das als Standbild vorschaut, unbrauchbar | Kein dupliziertes Band. Ein Wort erscheint **einmal**; Bewegung kommt aus Maske, Zoom oder Laufweite, nicht aus zwei Kopien nebeneinander |
+| **Freistell-Ränder an Personen** | Rote/weiße Fransen um Haare und Schultern | Freistellen nur, wenn es sauber wird. Sonst das Originalfoto nehmen und mit Verlauf oder Vignette in den Grund einbetten — ein ganzes Foto ist besser als ein schlecht ausgeschnittenes |
+
+### Textprüfung an jedem Schnappschuss (nicht überspringen)
+
+Beim Ansehen der Kontaktbögen wird **jedes Wort gelesen**, nicht nur der Eindruck geprüft:
+
+- Steht ein Wort versehentlich zweimal? (Marquee, Klon-Ebene, doppelte Zeile)
+- Ist ein Wort abgeschnitten, gestaucht oder in der Mitte umgebrochen?
+- Liegt Text auf einer hellen Bildstelle ohne Verlauf darunter?
+- Ragt etwas aus dem Bild, das nicht darf?
+
+Ein einziger dieser Fehler macht den Film unverkäuflich — er fällt jedem Kunden in der
+ersten Sekunde auf.
 
 ## 9. Referenzdateien
 
