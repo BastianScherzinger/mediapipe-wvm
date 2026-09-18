@@ -291,6 +291,33 @@ def anwendung_bauen() -> Flask:
     def premium_material_leeren(korb: str):
         return gut({"geleert": bragstudio.korb_leeren(korb)})
 
+    @app.post("/api/premium/aufwerten/<kennung>")
+    def premium_aufwerten(kennung: str):
+        """Wertet einen fertigen Premium-Film auf, statt einen neuen zu bauen.
+
+        Der Auftrag läuft im Ordner des Vorgängers: Material, aufbereitete Bilder und
+        beide Kompositionen sind da. Claude bekommt nur die Mängelliste und rendert neu.
+        Das kostet einen Bruchteil eines Neubaus — beim Kontingent wie an Zeit.
+        """
+        daten = request.get_json(silent=True) or {}
+        vorher = jobstore.holen(kennung)
+        if vorher is None or not (vorher.einstellungen or {}).get("premium"):
+            raise errors.EingabeFehler(
+                "Diesen Premium-Film gibt es nicht.",
+                "Aufwerten geht nur bei Filmen aus diesem Bereich.", ursprung=QUELLE)
+        if not vorher.ordner or not Path(vorher.ordner).is_dir():
+            raise errors.EingabeFehler(
+                "Der Ordner dieses Films fehlt.",
+                "Ohne die vorhandene Komposition lässt sich nichts aufwerten — "
+                "bitte einen neuen Film bauen.", ursprung=QUELLE)
+
+        roh = {**(vorher.einstellungen or {}), "art": "premium"}
+        roh["aufwerten_von"] = vorher.id
+        roh["wunsch"] = str(daten.get("maengel") or daten.get("wunsch") or "")[:2000]
+        auftrag, sofort = pipeline.einreihen(roh)
+        return gut({"auftrag": auftrag.als_dict(), "gestartet": sofort,
+                    "warteschlange": pipeline.warteschlange()}, 202)
+
     @app.post("/api/premium/ordner")
     def premium_ordner():
         """Öffnet den Ordner-Auswahldialog des Systems.

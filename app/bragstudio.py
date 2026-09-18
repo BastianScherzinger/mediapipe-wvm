@@ -283,6 +283,10 @@ def einstellungen_pruefen(roh: dict, Einstellungen):
         "modell": modell,
         "wunsch": " ".join(str(roh.get("wunsch") or "").split())[:600],
         "korb": re.sub(r"[^a-zA-Z0-9]", "", str(roh.get("korb") or ""))[:32],
+        # Kennung eines fertigen Auftrags, dessen Film verbessert werden soll. Dann
+        # wird in dessen Ordner weitergearbeitet: Material, Kompositionen und
+        # aufbereitete Bilder sind schon da, es geht nur noch um die Mängel.
+        "aufwerten_von": re.sub(r"[^a-f0-9]", "", str(roh.get("aufwerten_von") or ""))[:32],
     }
 
     return Einstellungen(
@@ -741,6 +745,37 @@ _BILDREGEL_WEBSEITE = """\
 - Der Film trägt sich über Aussage, Zahl und Ablauf — er braucht keine Bilderflut, darf
   aber auch nicht 20 Sekunden reine Schrift sein, wenn Bilder vorliegen."""
 
+#: Ein Aufwertungslauf ist kein neuer Film. Er ist die Abnahmerunde, die ein Kunde
+#: sonst mit roter Tinte zurückschickt: hier stimmt etwas nicht, bitte ändern, Rest
+#: bleibt. Das spart nicht nur Zeit, sondern das Vielfache an Kontingent — ein Neubau
+#: liest jedes Mal alle Skills, sichtet jedes Bild und schreibt jede Zeile neu.
+_AGENT_AUFWERTUNG = """\
+Du wertest einen **bereits fertigen Film** auf. Er ist gebaut, geprüft und gerendert —
+und er hat Mängel, die genannt sind. Arbeite sie ab und rendere neu.
+
+## Vorgehen
+1. Lies `rezept/REZEPT.md`, besonders die Kapitel zu Übergängen, Schnittrhythmus,
+   Menschen im Bild und dem Bauplan einer Szene.
+2. Sieh dir an, was schon da ist: `brag-output/composition/index.html` (Querformat) und
+   `brag-output/composition-hoch/index.html` (Hochformat), die Bilder in ihren
+   `assets/`-Ordnern, den Plan in `brag-output/brag-plan.md`.
+3. **Ändere nur, was die Mängelliste nennt** — und was daran hängt. Alles Übrige bleibt:
+   Texte, Farben, Schriften, Bildauswahl, Musik. Das ist abgenommene Arbeit.
+4. `npx hyperframes check` in beiden Ordnern, Schnappschüsse ansehen, dann **beide
+   Fassungen neu rendern** (`brag-output/brag.mp4` und `brag-output/brag-hochformat.mp4`).
+
+## Was auf keinen Fall passiert
+- Kein Neubau von Grund auf. Kein neues Konzept, keine neuen Texte, keine neue
+  Farbwelt — es sei denn, die Mängelliste verlangt es ausdrücklich.
+- Keine Verschlimmbesserung an Stellen, die niemand beanstandet hat.
+
+## Die Mängel
+{maengel}
+
+## Der ursprüngliche Auftrag (zur Orientierung, nicht neu umzusetzen)
+{auftrag}
+"""
+
 _AGENT_VORSPANN = """\
 Du baust einen verkaufsfähigen Marken-Film in ZWEI Formaten. Arbeite eigenständig bis
 zum fertigen Ergebnis und stelle keine Rückfragen.
@@ -941,9 +976,12 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
     p = dict(getattr(e, "premium", None) or {})
     titel = p.get("kunde") or _titel_aus(p)
 
+    vorlage = jobstore.holen(p.get("aufwerten_von", "")) if p.get("aufwerten_von") else None
     alt = jobstore.holen(e.wiederholung_von) if e.wiederholung_von else None
-    if alt is not None and alt.ordner and Path(alt.ordner).is_dir():
-        ordner = Path(alt.ordner)
+    fruehere = next((a for a in (vorlage, alt)
+                     if a is not None and a.ordner and Path(a.ordner).is_dir()), None)
+    if fruehere is not None:
+        ordner = Path(fruehere.ordner)
     else:
         ordner = jobstore.ordner_fuer(jobstore.holen(auftrag_id),
                                       "premium_" + _dateiname(titel))
@@ -951,10 +989,23 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
     arbeit.mkdir(parents=True, exist_ok=True)
     jobstore.aktualisieren(auftrag_id, titel=f"Premium-Film · {titel}", ordner=str(ordner))
 
+    aufwertung = vorlage is not None and (arbeit / "brag-output").is_dir()
+
     # ── Block 1: Material ────────────────────────────────────────────────────
     jobstore.aktualisieren(auftrag_id, block="material")
     _block(auftrag_id, "material", "aktiv", "Material wird zusammengestellt")
-    material = _material_sammeln(auftrag_id, p, arbeit, abbruch)
+    if aufwertung:
+        # Alles liegt schon im Ordner: Bilder, Aufnahmen, Kompositionen. Es noch einmal
+        # zu holen, kostet Zeit und ändert nichts.
+        material = {"texte": {}, "kurz": "vorhandener Film wird aufgewertet",
+                    "verzeichnis": _verzeichnis(arbeit), "leseproben": "",
+                    "bilder": _bilder_im_ordner(arbeit / "bilder", 14),
+                    "fokus": {"fokus": p.get("fokus", "auto"), "gewaehlt": True,
+                              "begruendung": "aus dem aufgewerteten Film übernommen"}}
+        logbook.info(QUELLE, f"Aufwertung von {vorlage.titel[:50]} — Material bleibt, "
+                             "es wird nur nachgebessert.", job=auftrag_id)
+    else:
+        material = _material_sammeln(auftrag_id, p, arbeit, abbruch)
     _block(auftrag_id, "material", "fertig", material["kurz"])
     _uebergang(auftrag_id, "material", "prompt")
     _pruefe_abbruch(abbruch)
@@ -963,7 +1014,15 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
     jobstore.aktualisieren(auftrag_id, block="prompt")
     _block(auftrag_id, "prompt", "aktiv", "Claude schreibt den Auftrag")
     _fortschritt(auftrag_id, "prompt", 0.2, 60, "Material wird gelesen")
-    master = master_prompt_schreiben(p, material, ordner, arbeit)
+    if aufwertung:
+        # Der Auftrag von damals gilt weiter; neu ist nur die Mängelliste. Ein zweites
+        # Mal denselben Auftrag schreiben zu lassen, kostet Kontingent ohne Gegenwert.
+        frueher = ordner / "master-prompt.md"
+        master = frueher.read_text(encoding="utf-8") if frueher.exists() else ""
+        logbook.info(QUELLE, "Der Auftrag des Vorgängerfilms wird weiterverwendet.",
+                     job=auftrag_id)
+    else:
+        master = master_prompt_schreiben(p, material, ordner, arbeit)
     jobstore.aktualisieren(auftrag_id, drehbuch={"master_prompt": master, "titel": titel})
     _fortschritt(auftrag_id, "prompt", 1.0, 0, "fertig")
     _block(auftrag_id, "prompt", "fertig", f"{len(master)} Zeichen",
@@ -980,14 +1039,21 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
     shutil.copytree(config.BASE_DIR / "bragvorlage", arbeit / "rezept", dirs_exist_ok=True)
 
     fokus = (material.get("fokus") or {}).get("fokus", "webseite")
-    vorlage = {"produkt": _BILDREGEL_PRODUKT,
-               "dienstleistung": _BILDREGEL_DIENSTLEISTUNG}.get(fokus, _BILDREGEL_WEBSEITE)
-    vorspann = _AGENT_VORSPANN.format(
-        minuten=config.BRAG_ZEITLIMIT // 60,
-        materialuebersicht=material["verzeichnis"],
-        bildregel=vorlage.format(
-            bilderliste=bilderliste(material.get("bilder") or [], arbeit)),
-        auftrag=master)
+    if aufwertung:
+        vorspann = _AGENT_AUFWERTUNG.format(
+            maengel=p.get("wunsch") or "Keine Mängel genannt — den Film prüfen und "
+                                       "die offensichtlichsten Schwächen beheben.",
+            auftrag=master[:6000])
+    else:
+        bildregel = {"produkt": _BILDREGEL_PRODUKT,
+                     "dienstleistung": _BILDREGEL_DIENSTLEISTUNG}.get(
+            fokus, _BILDREGEL_WEBSEITE)
+        vorspann = _AGENT_VORSPANN.format(
+            minuten=config.BRAG_ZEITLIMIT // 60,
+            materialuebersicht=material["verzeichnis"],
+            bildregel=bildregel.format(
+                bilderliste=bilderliste(material.get("bilder") or [], arbeit)),
+            auftrag=master)
     stand = {"block": "bauen", "schritte": 0, "begonnen": time.monotonic()}
 
     def agentenmeldung(text: str, art: str) -> None:
