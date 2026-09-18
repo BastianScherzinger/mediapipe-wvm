@@ -314,6 +314,11 @@ def anwendung_bauen() -> Flask:
         roh = {**(vorher.einstellungen or {}), "art": "premium"}
         roh["aufwerten_von"] = vorher.id
         roh["wunsch"] = str(daten.get("maengel") or daten.get("wunsch") or "")[:2000]
+        # Eine Nachbesserung darf mit einem anderen Modell laufen als der Neubau: Das
+        # Konzept steht, es geht nur noch um Handwerk — und ein knappes Kontingent
+        # reicht mit dem kleineren Modell für mehrere Runden statt für eine.
+        if daten.get("modell"):
+            roh["modell"] = str(daten["modell"])
         auftrag, sofort = pipeline.einreihen(roh)
         return gut({"auftrag": auftrag.als_dict(), "gestartet": sofort,
                     "warteschlange": pipeline.warteschlange()}, 202)

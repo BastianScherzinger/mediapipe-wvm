@@ -166,6 +166,42 @@ ffmpeg -i brag.mp4 -filter:v "select='gt(scene,0.25)',showinfo" -f null - 2>&1 |
 Zählt das weniger als zehn bei einem 25-Sekunden-Film, ist der Film zu träge —
 unabhängig davon, wie schön die einzelnen Bilder sind.
 
+**Den Befehl wörtlich übernehmen.** Wer ihn um `-v error` oder `-loglevel error`
+ergänzt, misst immer **null** Wechsel: `showinfo` schreibt seine Zeilen auf der Stufe
+`info`, und die ist dann abgeschaltet. Der Film sieht in dieser Messung selbst dann
+schnittlos aus, wenn er im Sekundentakt schneidet. Am 18.09.2026 hat genau das zu einer
+halben Stunde Arbeit an einem Mangel geführt, den es nicht gab — der Flügel-Film hatte
+fünf Wechsel, exakt so viele wie der Rümpelwerk-Film, der als Vorbild dient. Eine
+Messung, die null sagt, ist zuerst als kaputte Messung zu behandeln, nicht als Befund.
+
+## 4b2b. Der Schnitt zählt nur, wenn sich das **Bild** ändert
+
+Nach dem Einbau von acht zusätzlichen Schnitten maß die Szenenerkennung weiterhin zwei
+Wechsel. Der Grund war lehrreich: Alle vier Produktszenen hatten **denselben Aufbau** —
+dieselbe Spalte an derselben Stelle, derselbe Text daneben, derselbe Grund. Es wechselte
+nur der Pullover darin. Für das Auge (und für die Messung) ist das kein Schnitt, sondern
+ein Austausch.
+
+Erst als Spalte und Text bei jedem zweiten Teil **die Seite tauschten** (im Hochformat:
+oben/unten), sprang die Messung auf fünf bzw. acht Wechsel — und der Film bekam Puls.
+
+**Die Regel daraus:** Ein Schnitt braucht eine Änderung an mindestens zwei von drei
+Größen — **Anordnung**, **Fläche** (hell/dunkel), **Motiv**. Wer nur das Motiv tauscht,
+hat eine Diashow gebaut, egal wie viele Schnitte im Code stehen.
+
+Praktisch für eine Reihe gleichartiger Dinge (vier Produkte, vier Leistungen):
+
+| Teil | Anordnung | Fläche |
+|---|---|---|
+| 1 | Bild links, Text rechts | hell |
+| 2 | Bild rechts, Text links | hell |
+| 3 | Bild links, Text rechts | hell |
+| 4 | Bild rechts, Text links | hell |
+
+Im Hochformat tauschen stattdessen Bild und Text die Höhe. **Vorsicht dabei:** Ein
+zweizeiliger Schlusssatz braucht 400–500 px; wer das Bild nur 270 px verschiebt, legt es
+mitten ins Wort. Texthöhe ausrechnen, dann verschieben.
+
 ## 4b3. Menschen im Bild — die Regel, die ein Video sofort billig macht
 
 Der Luviq-Film zeigte die Inhaberin **freigestellt auf Schwarz**. Um Haare und Schultern
@@ -306,6 +342,59 @@ Nicht zwei Panels nebeneinander oder nacheinander, sondern **ein** formatfüllen
 über das eine Kante läuft und das zweite freigibt. Das Vorher steht 1,4 s, dann fährt die
 Kante in 1,0–1,2 s durch. Der Chip wechselt dabei von `VORHER` auf `NACHHER`. Nur so
 sieht man, dass es derselbe Ort ist — und genau das ist der Beweis, um den es geht.
+
+## 4d2. Kaschieren macht den Mangel größer — die Tarnkappen-Regel
+
+Am 18.09.2026 hatte der Flügel-Film drei Stellen, die ein Betrachter sofort als „von
+einer KI zusammengepfuscht" erkannte. Alle drei waren nicht der ursprüngliche Mangel,
+sondern der **Versuch, ihn zu verdecken**:
+
+| Was verdeckt werden sollte | Das Mittel | Was man dann sah |
+|---|---|---|
+| Ein 16:9-Foto füllt kein 9:16-Format | dasselbe Foto unscharf und dunkel als Grund darunter | ein Bildstreifen, der auf seinem eigenen Schatten schwimmt |
+| Ein Porträt passt nicht formatfüllend ins Bild | die Spalte mit 220 px weichem Verlauf ansetzen | eine Person, die aufgeklebt wirkt |
+| Die Fotos sind unterschiedlich hell und farbig | ein Verlauf in Markenblau über jedes Foto | fünf Szenen, die aussehen wie eine |
+
+Die Regel daraus: **Eine gestalterische Grenze wird gezeigt, nicht getarnt.** Ein
+weicher Übergang sagt „hier sollte eigentlich nichts sein" — und genau dorthin schaut
+das Auge. Eine harte Kante sagt „das ist so gebaut", und niemand fragt weiter.
+
+Konkret, in dieser Reihenfolge:
+
+1. **Formatfüllend ist immer die erste Wahl** (Regel 1 in 4d). Ausschnitt über
+   `object-position` verschieben.
+2. **Geht das nicht** — weil das Quellbild im falschen Format vorliegt und ein
+   Beschnitt Kopf, Kinn oder das Motiv zerstören würde —, dann **eine bewusste
+   Zweiteilung**: Bild auf der einen Seite, ruhige Farbfläche auf der anderen, dazwischen
+   eine **harte Kante** von 3–4 px in der hellen Markenfarbe. Diese Kante darf dasselbe
+   Element sein, das anderswo als Wischkante durchs Bild fährt — dann liest sie sich als
+   Handschrift des Films und nicht als Notbehelf.
+3. **Niemals** eine unscharf gerechnete Kopie des Bildes als Hintergrund. Sie füllt die
+   Fläche, ohne etwas zu zeigen, und verrät sich sofort.
+
+### Die Summe der Verläufe zählt, nicht der einzelne
+
+Jeder Verlauf für sich war im Flügel-Film vertretbar: 0,42 unter dem Text, 0,40 in der
+Vignette, 0,92 im Kopfdeckel, 0,88 als Schleier über der Faktenszene. Übereinander
+ergaben sie einen Film, in dem Terrasse, Rasen, Grabstein und Hauswand dieselbe Farbe
+hatten. Deshalb:
+
+* **Overlays in neutralem Dunkel** (`rgba(7,12,20,…)`), nicht in der Markenfarbe. Der
+  Markenton gehört auf Flächen, die er füllt — nicht auf Fotos, die er einfärbt.
+* **Höchstens ein großflächiger Verlauf je Szene.** Der Boden unter dem Text ist der
+  eine. Vignette höchstens 0,25, Kopfdeckel höchstens 0,76 und nur über 300 px.
+* **Die Probe:** Vier Schnappschüsse aus vier Szenen nebeneinander legen. Sehen die
+  Fotos aus wie vier Fotos oder wie viermal dasselbe Licht? Im zweiten Fall sind die
+  Verläufe zu stark, nicht die Bilder zu ähnlich.
+
+### Vorher/Nachher: Das Fenster richtet sich nach dem ungünstigeren Bild
+
+Beide Fotos eines Paares müssen **denselben** Ausschnitt zeigen, sonst vergleicht der
+Wischer zwei Orte statt einen — und der Beweis, um den es geht, ist weg. Liegen die
+Quellen in verschiedenen Seitenverhältnissen (bei Flügel: Vorher 900×1200 hochkant,
+Nachher 720×506 quer), dann bestimmt das **ungünstigere** Bild das Fensterformat. Was
+dann an Fläche übrig bleibt, wird nicht mit Unschärfe gefüllt, sondern als **Textzone**
+gestaltet: Chip, Zitat und Quelle stehen dort am selben linken Anker wie überall.
 
 ## 5. Ton
 
