@@ -29,7 +29,7 @@
   let restUhr = null;
   let verdrahtet = false;
 
-  MPW.ablauf = { aufbauen, zuruecksetzen, notiz, fuerAuftrag };
+  MPW.ablauf = { aufbauen, zuruecksetzen, notiz, fuerAuftrag, fuerBereich };
 
   /* ── Aufbau ────────────────────────────────────────────────────────────── */
 
@@ -49,6 +49,15 @@
     if (liste.map((b) => b.kennung).join() !== bloecke.map((b) => b.kennung).join()) {
       zeichnen(liste);
     }
+  }
+
+  /** Zeigt beim Wechsel des Bereichs dessen Blöcke — aber nur, solange nichts läuft.
+   *  Vorher stand im Premium-Bereich bis zum ersten Auftrag „Briefing · Claude ·
+   *  Startbild · Higgsfield“, also der Ablauf eines ganz anderen Werkzeugs. */
+  function fuerBereich(seite) {
+    if (MPW.start?.laeuft?.()) return;
+    const art = { studio: "video", webseite: "webseite", premium: "premium" }[seite] || "video";
+    fuerAuftrag({ einstellungen: { art } });
   }
 
   function zeichnen(liste) {

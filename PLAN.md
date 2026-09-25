@@ -1,10 +1,10 @@
 # MEDIAPIPE WVM — KI-Video-Studio
-### Implementierungsplan · aufgestellt 03.08.2026 · fortgeschrieben 26.08.2026
+### Implementierungsplan · aufgestellt 03.08.2026 · fortgeschrieben 25.09.2026
 
 Die Abschnitte 1 bis 5 sind der ursprüngliche Plan und bleiben unverändert stehen — sie
 zeigen, was vorher entschieden wurde. Was danach dazukam, steht in Abschnitt 6 unter
 „Danach hinzugekommen“; der jüngste Befund in
-[`docs/BEFUND_2026-08-26.md`](docs/BEFUND_2026-08-26.md).
+[`docs/BEFUND_2026-09-25.md`](docs/BEFUND_2026-09-25.md).
 
 ---
 
@@ -159,6 +159,9 @@ Der Fortschritt steht in der Aufgabenliste dieser Sitzung.
 | P23 | Startbild im Abo-Weg | `generate_video` bekommt das Startbild als `medias`-Kennung statt als Adresse, ein Ausfall kostet nicht den ganzen Film | fertig, 05.09.2026 |
 | P24 | Hochformat, das eines ist | Ein 9:16-Auftrag ergibt einen 9:16-Film, ein 9:16-Vorschaubild und eine 9:16-Kachel — vom Probelauf bis zur Bibliothek | fertig, 05.09.2026 |
 | P25 | Serientauglich für TikTok | Zielplattform setzt Format, Länge und Ausgabefassungen auf einen Klick; Aufträge lassen sich einreihen; Titel, Text und Hashtags entstehen mit | fertig, 05.09.2026 |
+| P26 | Webseite → TikTok | Aus einem Link entsteht ohne Guthaben ein 9:16-Werbevideo mit Musik | fertig, 11.09.2026 |
+| P27 | Premium-Film | Claude baut einen Marken-Film in beiden Formaten; Aufwerten statt Neubau | fertig, 18.09.2026 (Aufwerten-Oberfläche 25.09.) |
+| P28 | Durchsicht des gesamten Codes | Jeder belegte Befund behoben und durch Tests festgehalten, Doku auf dem Stand | fertig, 25.09.2026 — siehe [`docs/BEFUND_2026-09-25.md`](docs/BEFUND_2026-09-25.md) |
 
 **P21** entstand aus dem ersten echten Lauf beim Kunden. Ursache, Behebung und
 Prüfprotokoll stehen vollständig in

@@ -83,6 +83,7 @@
       else knopf.removeAttribute("aria-current");
     }
     MPW.speicher.schreiben("seite", seite);
+    MPW.ablauf?.fuerBereich?.(seite);
     try {
       window.history.replaceState(null, "", seite === "studio" ? "#" : "#" + seite);
     } catch (fehler) { /* im Desktop-Fenster ohne Bedeutung */ }

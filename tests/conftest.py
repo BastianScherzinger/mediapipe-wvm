@@ -5,8 +5,11 @@ ihn verändern. Ohne diese Datei schrieben Tests in das echte `data/` (Laufzeite
 Guthabenstand, Werkzeugbeschreibung), und auf einem Rechner mit hinterlegtem
 HIGGSFIELD_API_KEY oder verbundenem Abo gingen Selbsttests wirklich hinaus.
 
-Umgebogen werden nur die Speicherorte der Higgsfield-Module, nicht `config.DATA_DIR`
-selbst: Andere Tests setzen `DATA_DIR` gezielt und verlassen sich darauf.
+Auch `config.DATA_DIR` und `config.OUTPUT_DIR` zeigen je Test auf einen eigenen
+Ordner, mit frisch eingerichtetem Auftragsspeicher. Vorher legten die Premium-Tests ihre
+Aufträge im echten `data/auftraege.db` an — im Programm stand danach „Erneut versuchen“
+für einen Film, den nie jemand bestellt hatte. Tests, die `DATA_DIR` selbst setzen,
+überschreiben diese Vorgabe einfach.
 """
 from __future__ import annotations
 
@@ -17,7 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import config, higgsfield, higgsfield_mcp  # noqa: E402
+from app import config, higgsfield, higgsfield_mcp, jobstore  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -36,4 +39,16 @@ def higgsfield_abgeschottet(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(config, "HIGGSFIELD_API_KEY", "")
     monkeypatch.setattr(higgsfield.client, "api_key", "")
     monkeypatch.delenv("HIGGSFIELD_API_KEY", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def eigene_ablage(tmp_path_factory, monkeypatch):
+    """Eigener Daten- und Ausgabeordner je Test — nie der echte Bestand."""
+    wurzel = tmp_path_factory.mktemp("ablage")
+    (wurzel / "data").mkdir()
+    (wurzel / "output").mkdir()
+    monkeypatch.setattr(config, "DATA_DIR", wurzel / "data")
+    monkeypatch.setattr(config, "OUTPUT_DIR", wurzel / "output")
+    jobstore.einrichten()
     yield

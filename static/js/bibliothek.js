@@ -57,7 +57,7 @@
         icon("film"),
         el("p", { text: "Noch keine Videos." }),
         el("p", { klasse: "leer-klein",
-                  text: "Links ein Briefing eingeben und auf „Video erzeugen“ klicken." }),
+                  text: "Links angeben, was entstehen soll, und unten auf den Startknopf drücken." }),
       ]));
       return;
     }

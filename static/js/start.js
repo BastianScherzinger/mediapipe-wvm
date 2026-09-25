@@ -24,7 +24,8 @@
   // `pruefen` heißt nach außen so, wie der Knopf beschriftet ist. Die Abo-Anmeldung
   // ruft es auf, damit die Lampen sofort den neuen Zugang zeigen.
   MPW.start = { auftragStarten, auftragAbschicken, auftragAbbrechen, auftragWiederholen,
-                angenommen: nachDemAbschicken, pruefen: selbsttest };
+                angenommen: nachDemAbschicken, pruefen: selbsttest,
+                laeuft: () => Boolean(laufenderAuftrag) };
 
   document.addEventListener("DOMContentLoaded", hochfahren);
 
