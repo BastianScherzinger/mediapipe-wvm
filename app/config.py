@@ -260,7 +260,7 @@ def entschaerfe(text: str) -> str:
     Schlüssel in ihrer Ausnahme mitliefert."""
     if not text:
         return text
-    for geheim in (HIGGSFIELD_API_KEY, ANTHROPIC_KEY):
+    for geheim in (HIGGSFIELD_API_KEY, ANTHROPIC_KEY, CLAUDE_OAUTH_TOKEN):
         if geheim and len(geheim) > 8:
             text = text.replace(geheim, "‹Zugangsdaten entfernt›")
             # Auch die Bestandteile eines ID:SECRET-Schlüssels einzeln ersetzen.

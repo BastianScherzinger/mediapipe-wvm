@@ -12,7 +12,6 @@ Rechnung ist schlimmer als gar keine.
 """
 from __future__ import annotations
 
-import json
 import shutil
 import sys
 import threading
@@ -23,7 +22,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import (bragagent, bragstudio, config, errors, jobstore,  # noqa: E402
-                 library, media, pipeline)
+                 library, pipeline)
 
 HAT_FFMPEG = bool(config.ffmpeg_pfad())
 
@@ -289,6 +288,7 @@ def test_fehlschlag_des_agenten_wird_zum_erklaerten_fehler():
 def _video_schreiben(ziel: Path, breite: int, hoehe: int, sekunden: int = 4) -> None:
     """Ein echtes, winziges MP4 — damit `media.angaben()` etwas zu messen hat."""
     import subprocess
+    ziel.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [config.ffmpeg_pfad(), "-y", "-loglevel", "error", "-f", "lavfi",
          "-i", f"color=c=black:s={breite}x{hoehe}:d={sekunden}",
@@ -404,3 +404,243 @@ def test_pipeline_kennt_die_bloecke_des_premiumfilms():
     e = _einstellungen()
     assert e.art == "premium"
     assert set(bragstudio.BLOCKNAMEN) == set(bragstudio.BLOECKE)
+
+
+# ── Befunde der Durchsicht vom 25.09.2026 ────────────────────────────────────
+
+def test_ballastname_ueber_dem_projektordner_stoert_nicht(tmp_path):
+    """Liegt das Projekt unter …/build/kunde, ist das kein Grund, alles zu überspringen —
+    nur Ballast *innerhalb* des Projekts zählt."""
+    projekt = tmp_path / "build" / "kunde"
+    (projekt / "node_modules" / "paket").mkdir(parents=True)
+    (projekt / "index.html").write_text("<h1>Hallo</h1>", encoding="utf-8")
+    (projekt / "node_modules" / "paket" / "x.js").write_text("x", encoding="utf-8")
+    befund = bragstudio.ordner_pruefen(str(projekt))
+    assert befund["taugt"] and befund["texte"] == 1
+    gezaehlt = bragstudio.projekt_auszug(projekt, tmp_path / "ziel")
+    assert gezaehlt["texte"] == 1
+
+
+def test_zugangsdaten_verlassen_den_projektordner_nicht(tmp_path):
+    projekt = tmp_path / "projekt"
+    projekt.mkdir()
+    (projekt / "index.html").write_text("<h1>Marke</h1>", encoding="utf-8")
+    for geheim in (".env", "settings.py", "credentials.json", "secrets.yaml.txt",
+                   "server.pem", "id_rsa"):
+        (projekt / geheim).write_text("SECRET_KEY=abc", encoding="utf-8")
+    gezaehlt = bragstudio.projekt_auszug(projekt, tmp_path / "ziel")
+    kopiert = sorted(p.name for p in (tmp_path / "ziel").rglob("*") if p.is_file())
+    assert kopiert == ["index.html"]
+    assert gezaehlt["geheim"] >= 4
+
+
+def test_projektauszug_laesst_sich_abbrechen(tmp_path):
+    projekt = tmp_path / "projekt"
+    projekt.mkdir()
+    (projekt / "index.html").write_text("x", encoding="utf-8")
+    abbruch = threading.Event()
+    abbruch.set()
+    with pytest.raises(errors.AbbruchFehler):
+        bragstudio.projekt_auszug(projekt, tmp_path / "ziel", abbruch)
+
+
+def test_liegen_gebliebene_koerbe_werden_aufgeraeumt(tmp_path, monkeypatch):
+    import os
+    import time as zeit
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    bragstudio.material_annehmen("alt", [_Hochgeladen("a.png")])
+    bragstudio.material_annehmen("neu", [_Hochgeladen("b.png")])
+    vor_zwei_tagen = zeit.time() - 2 * 86400
+    os.utime(tmp_path / "material" / "alt", (vor_zwei_tagen, vor_zwei_tagen))
+    assert bragstudio.koerbe_aufraeumen() == 1
+    assert not (tmp_path / "material" / "alt").exists()
+    assert (tmp_path / "material" / "neu").exists()
+
+
+def test_korb_hat_eine_gesamtgrenze(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(bragstudio, "MAX_UPLOAD_BYTES", 10)
+    bragstudio.material_annehmen("k", [_Hochgeladen("a.png", b"x" * 8)])
+    zweiter = bragstudio.material_annehmen("k", [_Hochgeladen("b.png", b"x" * 8),
+                                                 _Hochgeladen("c.png", b"x" * 8)])
+    assert zweiter["anzahl"] == 1 and zweiter["abgewiesen"] == ["c.png"]
+
+
+def test_aufwerten_nimmt_die_maengel_nicht_den_alten_wunsch(tmp_path):
+    erst = _einstellungen(quelle="ordner", projektordner=str(tmp_path),
+                          wunsch="Bitte viel Gold")
+    roh = {**erst.als_dict(), "aufwerten_von": "abc123", "maengel": "Logo zu klein. " * 100}
+    neu = pipeline.einstellungen_pruefen(roh)
+    assert neu.premium["maengel"].startswith("Logo zu klein.")
+    assert len(neu.premium["maengel"]) > 600, "die Mängelliste darf nicht auf 600 schrumpfen"
+    # Ohne Aufwertung gibt es keine Mängel — der Wunsch bleibt, wo er hingehört.
+    assert pipeline.einstellungen_pruefen(erst.als_dict()).premium["maengel"] == ""
+
+
+def test_aufwerten_geht_auch_ohne_den_alten_projektordner(tmp_path):
+    projekt = tmp_path / "projekt"
+    projekt.mkdir()
+    erst = _einstellungen(quelle="ordner", projektordner=str(projekt))
+    projekt.rmdir()
+    neu = pipeline.einstellungen_pruefen({**erst.als_dict(), "aufwerten_von": "abc123"})
+    assert neu.premium["aufwerten_von"] == "abc123"
+    with pytest.raises(errors.EingabeFehler):
+        pipeline.einstellungen_pruefen(erst.als_dict())
+
+
+def test_nur_ein_shellbefehl_zum_rendern_schaltet_die_anzeige_weiter():
+    assert bragstudio._ist_render("Bash: npx hyperframes render composition")
+    assert not bragstudio._ist_render("Read: brag-output/render-notes.md")
+
+
+def test_agent_sieht_keine_fremden_zugangsdaten():
+    umgebung = bragagent._ohne_geheimnisse({
+        "PATH": "/bin", "CLAUDE_CODE_OAUTH_TOKEN": "abo", "GITHUB_TOKEN": "g",
+        "HF_TOKEN": "h", "NPM_TOKEN": "n", "MEIN_API_KEY": "k", "HIGGSFIELD_API_KEY": "x"})
+    assert umgebung == {"PATH": "/bin", "CLAUDE_CODE_OAUTH_TOKEN": "abo"}
+
+
+def test_oauth_token_wird_geschwaerzt(monkeypatch):
+    monkeypatch.setattr(config, "CLAUDE_OAUTH_TOKEN", "sk-ant-oat01-geheimgeheim")
+    assert "geheimgeheim" not in config.entschaerfe("Fehler mit sk-ant-oat01-geheimgeheim")
+
+
+def test_hilfsprogramme_werden_samt_endung_aufgeloest(monkeypatch):
+    """Unter Windows liegt npx als npx.cmd vor; ohne Auflösung findet subprocess es nicht."""
+    gefunden = {"npx.cmd": r"C:\nodejs\npx.cmd"}
+    monkeypatch.setattr(bragagent.shutil, "which", lambda name: gefunden.get(name))
+    assert bragagent._programm("npx") == r"C:\nodejs\npx.cmd"
+    assert bragagent._programm("gibtsnicht") == "gibtsnicht"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Attrappe ist ein Shell-Skript")
+def test_abbruch_wirkt_auch_wenn_der_agent_schweigt(tmp_path, monkeypatch):
+    """Ein Werkzeugaufruf wie `hyperframes render` gibt minutenlang nichts aus. Der
+    Abbruch muss trotzdem sofort greifen — und die Kindprozesse mitnehmen."""
+    import time as zeit
+    kind_pid = tmp_path / "kind.pid"
+    cli = tmp_path / "claude"
+    cli.write_text("#!/bin/sh\nsleep 300 &\necho $! > " + str(kind_pid) + "\nwait\n",
+                   encoding="utf-8")
+    cli.chmod(0o755)
+    monkeypatch.setattr(config, "claude_cli_pfad", lambda: str(cli))
+    monkeypatch.setattr(bragagent, "_binordner", lambda: tmp_path)
+
+    abbruch = threading.Event()
+    threading.Timer(1.0, abbruch.set).start()
+    begonnen = zeit.monotonic()
+    with pytest.raises(errors.AbbruchFehler):
+        bragagent.lauf(tmp_path / "arbeit", "baue", modell="m", zeitlimit=600,
+                       abbruch=abbruch)
+    assert zeit.monotonic() - begonnen < 15
+
+    import os
+    pid = int(kind_pid.read_text().strip())
+    zeit.sleep(0.3)
+    try:
+        os.kill(pid, 0)
+        # Zombie zählt nicht als lebendig.
+        with open(f"/proc/{pid}/stat") as f:
+            lebt = f.read().split()[2] != "Z"
+    except (OSError, FileNotFoundError):
+        lebt = False
+    assert not lebt, "der Kindprozess des Agenten läuft nach dem Abbruch weiter"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Attrappe ist ein Shell-Skript")
+def test_zeitlimit_wirkt_auch_wenn_der_agent_schweigt(tmp_path, monkeypatch):
+    import time as zeit
+    cli = tmp_path / "claude"
+    cli.write_text("#!/bin/sh\nsleep 300\n", encoding="utf-8")
+    cli.chmod(0o755)
+    monkeypatch.setattr(config, "claude_cli_pfad", lambda: str(cli))
+    monkeypatch.setattr(bragagent, "_binordner", lambda: tmp_path)
+    begonnen = zeit.monotonic()
+    with pytest.raises(errors.ZeitFehler):
+        bragagent.lauf(tmp_path / "arbeit", "baue", modell="m", zeitlimit=1)
+    assert zeit.monotonic() - begonnen < 15
+
+
+def test_unlesbare_seite_laesst_den_auftrag_weiterlaufen(tmp_path, monkeypatch):
+    """403 an Programme ist Alltag — der Film entsteht dann aus Material und Beschreibung."""
+    def abgelehnt(url):
+        raise errors.EingabeFehler("Die Seite antwortet mit 403.")
+    monkeypatch.setattr(bragstudio.webaufnahme, "adresse_pruefen", abgelehnt)
+    monkeypatch.setattr(bragstudio, "_bilder_von_der_seite", lambda *a, **k: [])
+    monkeypatch.setattr(bragstudio, "_aufnehmen_mit_grenze", lambda *a, **k: None)
+    material = bragstudio._material_sammeln(
+        "x", {"quelle": "webseite", "url": "https://beispiel.de", "fokus": "auto"},
+        tmp_path / "arbeit", threading.Event())
+    assert material["texte"] == {}
+    assert "keine Bildschirmaufnahmen" in material["kurz"]
+
+
+def test_produktfilm_mit_eigenen_fotos_spart_sich_die_aufnahme(tmp_path, monkeypatch):
+    monkeypatch.setattr(bragstudio.webaufnahme, "adresse_pruefen",
+                        lambda url: {"titel": "Mode-Shop", "ueberschriften": ["Kollektion"]})
+    monkeypatch.setattr(bragstudio, "_bilder_von_der_seite",
+                        lambda *a, **k: _bilder(6, "kleid"))
+    monkeypatch.setattr(bragstudio, "fokus_bestimmen",
+                        lambda b, t, g="auto": {"fokus": "produkt", "gewaehlt": False,
+                                                "begruendung": "Test"})
+    monkeypatch.setattr(bragstudio.library, "web_pfad", lambda p: str(p))
+
+    def aufnahme(*a, **k):
+        raise AssertionError("die Aufnahme hätte übersprungen werden müssen")
+    monkeypatch.setattr(bragstudio, "_aufnehmen_mit_grenze", aufnahme)
+    material = bragstudio._material_sammeln(
+        "x", {"quelle": "webseite", "url": "https://beispiel.de", "fokus": "auto"},
+        tmp_path / "arbeit", threading.Event())
+    assert "Bildschirmaufnahme nicht nötig" in material["kurz"]
+
+
+@pytest.mark.skipif(not HAT_FFMPEG, reason="ohne ffmpeg nicht prüfbar")
+def test_material_video_ist_kein_fertiger_film(tmp_path):
+    """Ein hochgeladener großer Clip im Material darf nie als Ergebnis gelten."""
+    arbeit = tmp_path / "arbeit"
+    _video_schreiben(arbeit / "material" / "gross.mp4", 1280, 720)
+    _video_schreiben(arbeit / "brag-output" / "brag.mp4", 640, 360)
+    videos = bragstudio._gerenderte_videos(arbeit)
+    assert [p.name for p, _ in videos] == ["brag.mp4"]
+
+    nur_material = tmp_path / "leer"
+    _video_schreiben(nur_material / "material" / "gross.mp4", 1280, 720)
+    assert bragstudio._gerenderte_videos(nur_material) == []
+
+
+@pytest.mark.skipif(not HAT_FFMPEG, reason="ohne ffmpeg nicht prüfbar")
+def test_aufwertung_sichert_den_alten_film_und_nutzt_keine_alten_renders(tmp_path,
+                                                                       monkeypatch):
+    import time as zeit
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "output")
+    config.OUTPUT_DIR.mkdir(parents=True)
+    monkeypatch.setattr(bragagent, "werkzeuge_sichern", lambda melden=None: None)
+
+    # Der Vorgänger: fertiger Film samt Komposition und Auftrag.
+    erst = _einstellungen(quelle="thema", thema="Ein Dachdecker seit 1968 in Leipzig.")
+    vorher = jobstore.anlegen(erst.briefing, erst.als_dict())
+    ordner = config.OUTPUT_DIR / "premium_dach"
+    _video_schreiben(ordner / "arbeit" / "brag-output" / "brag.mp4", 640, 360)
+    shutil.copy2(ordner / "arbeit" / "brag-output" / "brag.mp4", ordner / "film.mp4")
+    (ordner / "master-prompt.md").write_text("# Alter Auftrag", encoding="utf-8")
+    jobstore.aktualisieren(vorher.id, ordner=str(ordner), zustand=jobstore.FERTIG)
+    alt = zeit.time() - 3600
+    import os
+    os.utime(ordner / "arbeit" / "brag-output" / "brag.mp4", (alt, alt))
+
+    e = pipeline.einstellungen_pruefen({**erst.als_dict(), "aufwerten_von": vorher.id,
+                                        "maengel": "Das Logo ist zu klein."})
+    auftrag = jobstore.anlegen(e.briefing, e.als_dict())
+    gesehen = {}
+
+    def nichts_gerendert(arbeit, prompt, **rest):
+        gesehen["prompt"] = prompt
+        return bragagent.Lauf(text="fertig")
+    monkeypatch.setattr(bragagent, "lauf", nichts_gerendert)
+
+    with pytest.raises(errors.VerarbeitungsFehler):
+        bragstudio.ablauf(auftrag.id, e, threading.Event())
+    assert "Das Logo ist zu klein." in gesehen["prompt"]
+    assert "# Alter Auftrag" in gesehen["prompt"]
+    gesichert = list((ordner / "fruehere_fassungen").rglob("film.mp4"))
+    assert gesichert, "der abgenommene Film muss vor der Aufwertung gesichert werden"

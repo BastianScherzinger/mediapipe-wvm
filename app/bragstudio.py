@@ -31,6 +31,7 @@ denen dieselbe Entscheidung getroffen wird, und die eine wäre immer die schlech
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import threading
@@ -189,6 +190,16 @@ MAX_UPLOAD_BYTES = 250 * 1024 * 1024
 _UPLOAD_ENDUNGEN = (_BILD_ENDUNGEN | _TEXT_ENDUNGEN | _SCHRIFT_ENDUNGEN |
                     {".mp4", ".mov", ".webm", ".m4v", ".pdf", ".mp3", ".wav", ".csv"})
 
+#: Dateien, die Zugangsdaten enthalten können. Sie werden aus einem Projektordner nie
+#: kopiert: Die Kopie läge dauerhaft unter `output/` und wäre für den Agenten lesbar.
+_GEHEIMDATEI = re.compile(
+    r"(^\.|secret|credential|passw|token|\.env|\.pem$|\.key$|\.p12$|\.pfx$|id_rsa|"
+    r"id_ed25519|service.?account|^settings.*\.py$|^local_settings|\.npmrc$|\.pypirc$|"
+    r"^auth\.json$|_auth\.json$)", re.IGNORECASE)
+
+#: Wie lange ein nie abgeholter Materialkorb liegen bleibt, bevor er beim Start fällt.
+KORB_HALTBARKEIT = 24 * 3600
+
 #: Grenzen für den Materialauszug aus einem Projektordner.
 _MAX_TEXTDATEI = 400_000        # größere Dateien sind Daten, kein Inhalt
 _MAX_DATEIEN = 400
@@ -239,7 +250,9 @@ def einstellungen_pruefen(roh: dict, Einstellungen):
                 "Es fehlt der Projektordner.",
                 "Auf „Ordner wählen“ klicken und den Ordner der Webseite auswählen.",
                 ursprung=QUELLE)
-        if not Path(ordner).is_dir():
+        # Beim Aufwerten liegt alles Material schon im Auftragsordner — der ursprüngliche
+        # Projektordner darf inzwischen verschoben oder gelöscht sein.
+        if not Path(ordner).is_dir() and not roh.get("aufwerten_von"):
             raise errors.EingabeFehler(
                 "Diesen Ordner gibt es nicht.",
                 f"Geprüft wurde: {ordner[:160]}", ursprung=QUELLE)
@@ -282,6 +295,10 @@ def einstellungen_pruefen(roh: dict, Einstellungen):
         "sprache": sprache,
         "modell": modell,
         "wunsch": " ".join(str(roh.get("wunsch") or "").split())[:600],
+        # Nur beim Aufwerten: was am Vorgängerfilm nicht stimmt. Ein eigenes Feld, damit
+        # nicht still der Wunsch des Erstauftrags als Mängelliste durchgeht.
+        "maengel": (" ".join(str(roh.get("maengel") or "").split())[:2000]
+                    if roh.get("aufwerten_von") else ""),
         "korb": re.sub(r"[^a-zA-Z0-9]", "", str(roh.get("korb") or ""))[:32],
         # Kennung eines fertigen Auftrags, dessen Film verbessert werden soll. Dann
         # wird in dessen Ordner weitergearbeitet: Material, Kompositionen und
@@ -358,6 +375,7 @@ def material_annehmen(korb: str, dateien) -> dict:
                                    ursprung=QUELLE)
     ziel = korb_ordner(korb)
     angenommen, abgewiesen, bytes_gesamt = [], [], 0
+    schon_da = sum(p.stat().st_size for p in ziel.rglob("*") if p.is_file())
 
     for datei in dateien or []:
         roh = datei.filename or ""
@@ -368,6 +386,11 @@ def material_annehmen(korb: str, dateien) -> dict:
             continue
         name = teile[-1]
         if Path(name).suffix.lower() not in _UPLOAD_ENDUNGEN:
+            abgewiesen.append(name)
+            continue
+        if schon_da + bytes_gesamt >= MAX_UPLOAD_BYTES:
+            # Mehrere Uploads in denselben Korb dürfen zusammen nicht mehr werden als
+            # einer — sonst füllt ein wiederholter Ordner-Upload die Platte.
             abgewiesen.append(name)
             continue
         pfad = ziel.joinpath(*teile[-3:])       # höchstens zwei Ebenen Struktur
@@ -396,6 +419,46 @@ def korb_leeren(korb: str) -> int:
     return anzahl
 
 
+def koerbe_aufraeumen(alter: float = KORB_HALTBARKEIT) -> int:
+    """Räumt Materialkörbe weg, die nie abgeholt wurden (Programmstart).
+
+    Ein Korb entsteht mit dem ersten Upload und wird vom Auftrag geleert. Bleibt er
+    liegen — Fenster geschlossen, Start abgelehnt —, wären das bis zu 250 MB je Korb.
+    """
+    wurzel = config.DATA_DIR / "material"
+    if not wurzel.is_dir():
+        return 0
+    grenze = time.time() - alter
+    entfernt = 0
+    for korb in wurzel.iterdir():
+        try:
+            if korb.is_dir() and korb.stat().st_mtime < grenze:
+                shutil.rmtree(korb, ignore_errors=True)
+                entfernt += 1
+        except OSError:
+            continue
+    if entfernt:
+        logbook.info(QUELLE, f"{entfernt} liegen gebliebene(r) Materialkorb/Körbe entfernt.")
+    return entfernt
+
+
+def _durchlaufen(wurzel: Path, abbruch: "threading.Event | None" = None):
+    """Alle Dateien eines Projektordners, ohne Ballast und versteckte Ordner zu betreten.
+
+    `os.walk` mit Beschneidung statt `rglob`: Ein `node_modules` hat schnell hunderttausend
+    Einträge, und wer versehentlich `C:\\` wählt, soll nicht die ganze Platte warten.
+    Geprüft werden nur die Teile *unterhalb* der Wurzel — liegt das Projekt selbst unter
+    `D:\\build\\kunde`, ist das kein Grund, alles zu überspringen.
+    """
+    for ordner, unterordner, dateien in os.walk(wurzel):
+        if abbruch is not None:
+            _pruefe_abbruch(abbruch)
+        unterordner[:] = sorted(d for d in unterordner
+                                if d not in _UEBERSPRINGEN and not d.startswith("."))
+        for name in sorted(dateien):
+            yield Path(ordner) / name
+
+
 def ordner_waehlen() -> dict:
     """Öffnet den Ordner-Dialog des Systems und gibt den gewählten Pfad zurück.
 
@@ -411,6 +474,9 @@ def ordner_waehlen() -> dict:
             "Bitte den Pfad des Ordners von Hand in das Feld schreiben.", ursprung=QUELLE)
 
     skript = (
+        # Ohne diese Zeile schreibt PowerShell in der OEM-Codepage, und ein Umlaut im
+        # Pfad (…\\Büro\\…) ließ das Lesen mit einem Dekodierfehler abstürzen.
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"
         "Add-Type -AssemblyName System.Windows.Forms;"
         "$eltern = New-Object System.Windows.Forms.Form -Property @{TopMost=$true};"
         "$d = New-Object System.Windows.Forms.FolderBrowserDialog;"
@@ -421,8 +487,9 @@ def ordner_waehlen() -> dict:
     )
     try:
         lauf = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", skript],
-                              capture_output=True, text=True, timeout=600)
-    except (OSError, subprocess.SubprocessError) as fehler:
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=600)
+    except (OSError, subprocess.SubprocessError, UnicodeError) as fehler:
         raise errors.VerarbeitungsFehler(
             "Der Ordner-Dialog ließ sich nicht öffnen.",
             f"Bitte den Pfad von Hand eintragen. Systemmeldung: {fehler}",
@@ -446,11 +513,7 @@ def ordner_pruefen(pfad: str) -> dict:
             "Diesen Ordner gibt es nicht.", f"Geprüft wurde: {pfad[:160]}", ursprung=QUELLE)
 
     texte = bilder = 0
-    for datei in ordner.rglob("*"):
-        if not datei.is_file():
-            continue
-        if any(teil in _UEBERSPRINGEN for teil in datei.parts):
-            continue
+    for datei in _durchlaufen(ordner):
         endung = datei.suffix.lower()
         if endung in _TEXT_ENDUNGEN:
             texte += 1
@@ -467,7 +530,8 @@ def ordner_pruefen(pfad: str) -> dict:
                        "sich kein Film bauen."}
 
 
-def projekt_auszug(quelle: Path, ziel: Path) -> dict:
+def projekt_auszug(quelle: Path, ziel: Path,
+                   abbruch: "threading.Event | None" = None) -> dict:
     """Kopiert aus einem Projektordner nur das, was für einen Film zählt.
 
     Warum nicht der ganze Ordner: Ein Django-Projekt hat schnell 500 MB in
@@ -477,16 +541,18 @@ def projekt_auszug(quelle: Path, ziel: Path) -> dict:
     """
     quelle, ziel = Path(quelle), Path(ziel)
     ziel.mkdir(parents=True, exist_ok=True)
-    genommen = {"texte": 0, "bilder": 0, "schriften": 0, "bytes": 0, "ausgelassen": 0}
+    genommen = {"texte": 0, "bilder": 0, "schriften": 0, "bytes": 0, "ausgelassen": 0,
+                "geheim": 0}
 
-    for pfad in sorted(quelle.rglob("*")):
+    for pfad in _durchlaufen(quelle, abbruch):
         if genommen["texte"] + genommen["bilder"] + genommen["schriften"] >= _MAX_DATEIEN:
             break
         if genommen["bytes"] >= _MAX_GESAMT:
             break
         if not pfad.is_file() or pfad.is_symlink():
             continue
-        if any(teil in _UEBERSPRINGEN or teil.startswith(".") for teil in pfad.relative_to(quelle).parts[:-1]):
+        if _GEHEIMDATEI.search(pfad.name):
+            genommen["geheim"] += 1
             continue
         endung = pfad.suffix.lower()
         try:
@@ -548,7 +614,7 @@ def _verzeichnis(ordner: Path, grenze: int = 120) -> str:
             continue
         zeilen.append(f"  {pfad.relative_to(ordner).as_posix()}  ({groesse // 1024} KB)")
         if len(zeilen) >= grenze:
-            zeilen.append(f"  … und weitere Dateien")
+            zeilen.append("  … und weitere Dateien")
             break
     return "\n".join(zeilen) or "  (keine)"
 
@@ -991,6 +1057,13 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
 
     aufwertung = vorlage is not None and (arbeit / "brag-output").is_dir()
 
+    # Voraussetzungen zuerst: Fehlt Node oder die CLI, soll das nach Sekunden feststehen —
+    # nicht nach sieben Minuten Aufnahme und einem bezahlten Aufruf fürs Drehbuch.
+    bragagent.werkzeuge_sichern(
+        melden=lambda text: logbook.info(QUELLE, text, job=auftrag_id))
+    if aufwertung:
+        _fassungen_sichern(ordner, auftrag_id)
+
     # ── Block 1: Material ────────────────────────────────────────────────────
     jobstore.aktualisieren(auftrag_id, block="material")
     _block(auftrag_id, "material", "aktiv", "Material wird zusammengestellt")
@@ -1019,8 +1092,13 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
         # Mal denselben Auftrag schreiben zu lassen, kostet Kontingent ohne Gegenwert.
         frueher = ordner / "master-prompt.md"
         master = frueher.read_text(encoding="utf-8") if frueher.exists() else ""
-        logbook.info(QUELLE, "Der Auftrag des Vorgängerfilms wird weiterverwendet.",
-                     job=auftrag_id)
+        if master:
+            logbook.info(QUELLE, "Der Auftrag des Vorgängerfilms wird weiterverwendet.",
+                         job=auftrag_id)
+        else:
+            logbook.warnung(QUELLE, "Der Auftrag des Vorgängerfilms fehlt — Claude arbeitet "
+                                    "nur mit der Mängelliste und der Komposition.",
+                            job=auftrag_id)
     else:
         master = master_prompt_schreiben(p, material, ordner, arbeit)
     jobstore.aktualisieren(auftrag_id, drehbuch={"master_prompt": master, "titel": titel})
@@ -1034,14 +1112,12 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
     # ── Block 3+4: Bauen und Rendern ─────────────────────────────────────────
     jobstore.aktualisieren(auftrag_id, block="bauen")
     _block(auftrag_id, "bauen", "aktiv", "Claude baut die Komposition")
-    bragagent.werkzeuge_sichern(
-        melden=lambda text: logbook.info(QUELLE, text, job=auftrag_id))
     shutil.copytree(config.BASE_DIR / "bragvorlage", arbeit / "rezept", dirs_exist_ok=True)
 
     fokus = (material.get("fokus") or {}).get("fokus", "webseite")
     if aufwertung:
         vorspann = _AGENT_AUFWERTUNG.format(
-            maengel=p.get("wunsch") or "Keine Mängel genannt — den Film prüfen und "
+            maengel=p.get("maengel") or "Keine Mängel genannt — den Film prüfen und "
                                        "die offensichtlichsten Schwächen beheben.",
             auftrag=master[:6000])
     else:
@@ -1062,7 +1138,7 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
             logbook.debug(QUELLE, text, job=auftrag_id)
             # Sobald gerendert wird, springt die Anzeige weiter: Das ist der letzte
             # und längste Abschnitt, und der Kunde soll sehen, dass es vorangeht.
-            if "render" in text.lower() and stand["block"] != "render":
+            if _ist_render(text) and stand["block"] != "render":
                 _block(auftrag_id, "bauen", "fertig", f"{stand['schritte']} Schritte")
                 _uebergang(auftrag_id, "bauen", "render")
                 jobstore.aktualisieren(auftrag_id, block="render")
@@ -1075,6 +1151,7 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
         _fortschritt(auftrag_id, stand["block"], anteil, 0,
                      f"{stand['schritte']} Arbeitsschritte")
 
+    laufbeginn = time.time()
     lauf = bragagent.lauf(arbeit, vorspann, modell=p.get("modell") or config.BRAG_MODEL,
                           abbruch=abbruch, melden=agentenmeldung)
     if stand["block"] == "bauen":
@@ -1089,10 +1166,57 @@ def ablauf(auftrag_id: str, e, abbruch: threading.Event) -> dict:
     # ── Block 5: Ausgabe ─────────────────────────────────────────────────────
     jobstore.aktualisieren(auftrag_id, block="ausgabe")
     _block(auftrag_id, "ausgabe", "aktiv", "Fassungen werden abgelegt")
-    ergebnis = _ausgabe(auftrag_id, e, p, titel, ordner, arbeit, lauf, abbruch)
+    ergebnis = _ausgabe(auftrag_id, e, p, titel, ordner, arbeit, lauf, abbruch,
+                        seit=laufbeginn)
     _block(auftrag_id, "ausgabe", "fertig",
            f"{ergebnis['dauer']:.0f} s · {ergebnis['bytes'] / 1_048_576:.1f} MB")
     return ergebnis
+
+
+def _ist_render(text: str) -> bool:
+    """Ist dieser Werkzeugaufruf das Rendern? Nur ein Shell-Befehl zählt — ein `Read` auf
+    eine Datei, deren Name „render“ enthält, ließ die Anzeige zu früh weiterspringen."""
+    klein = text.lower()
+    return klein.startswith("bash:") and "render" in klein
+
+
+def _fassungen_sichern(ordner: Path, auftrag_id: str) -> None:
+    """Legt den Film des Vorgängers beiseite, bevor die Aufwertung ihn ersetzt.
+
+    Die Aufwertung arbeitet im selben Ordner. Ohne diese Sicherung wäre der abgenommene
+    Film weg, sobald die neue Fassung kommt — auch wenn sie schlechter ist.
+    """
+    vorhanden = [ordner / n for n in ("film.mp4", "film_hoch.mp4", "film_poster.jpg")
+                 if (ordner / n).exists()]
+    if not vorhanden:
+        return
+    ziel = ordner / "fruehere_fassungen" / time.strftime("%Y-%m-%d_%H%M%S")
+    ziel.mkdir(parents=True, exist_ok=True)
+    for datei in vorhanden:
+        try:
+            shutil.copy2(datei, ziel / datei.name)
+        except OSError as fehler:
+            logbook.warnung(QUELLE, f"{datei.name} ließ sich nicht sichern: {fehler}",
+                            job=auftrag_id)
+    logbook.info(QUELLE, f"Bisherige Fassung gesichert: fruehere_fassungen/{ziel.name}",
+                 job=auftrag_id)
+
+
+def aufwertung_offen(kennung: str) -> bool:
+    """Läuft oder wartet schon eine Aufwertung dieses Films? Zwei gleichzeitig würden im
+    selben Ordner arbeiten und sich die Kompositionen gegenseitig überschreiben."""
+    from . import pipeline
+    kandidaten = [a for a in pipeline.warteschlange()]
+    laufend = pipeline.laeuft_gerade()
+    if laufend:
+        auftrag = jobstore.holen(laufend)
+        if auftrag is not None:
+            kandidaten.append(auftrag.als_dict())
+    for eintrag in kandidaten:
+        premium = ((eintrag.get("einstellungen") or {}).get("premium") or {})
+        if premium.get("aufwerten_von") == kennung:
+            return True
+    return False
 
 
 def _aufnehmen_mit_grenze(auftrag_id: str, url: str, ordner: Path,
@@ -1125,6 +1249,10 @@ def _aufnehmen_mit_grenze(auftrag_id: str, url: str, ordner: Path,
         if abbruch.is_set() or time.monotonic() > frist:
             ende.set()
             faden.join(timeout=20)
+            if faden.is_alive():
+                logbook.warnung(QUELLE, "Die Aufnahme reagiert nicht auf das Ende der Frist "
+                                        "— sie läuft im Hintergrund aus, ihre Bilder werden "
+                                        "nicht mehr verwendet.", job=auftrag_id)
             break
         faden.join(timeout=2)
 
@@ -1223,7 +1351,15 @@ def _material_sammeln(auftrag_id: str, p: dict, arbeit: Path,
         # Bildschirmaufnahmen (Minuten, mit Frist). Ein Film überlebt fehlende
         # Aufnahmen; ohne Fotos wird er beliebig.
         _fortschritt(auftrag_id, "material", 0.1, 60, "Die Seite wird gelesen")
-        material["texte"] = {k: v for k, v in webaufnahme.adresse_pruefen(p["url"]).items()
+        try:
+            gelesen = webaufnahme.adresse_pruefen(p["url"])
+        except errors.StudioFehler as fehler:
+            # 403 an Programme, kurz nicht erreichbar: Der Film kann trotzdem aus Fotos,
+            # Aufnahmen, Beschreibung und Material entstehen.
+            logbook.warnung(QUELLE, f"Die Texte der Seite ließen sich nicht lesen: "
+                                    f"{fehler.meldung}", job=auftrag_id)
+            gelesen = {}
+        material["texte"] = {k: v for k, v in gelesen.items()
                              if k in ("titel", "beschreibung", "marke", "farbe",
                                       "ueberschriften", "knoepfe")}
         _fortschritt(auftrag_id, "material", 0.2, 45, "Fotos der Seite werden geladen")
@@ -1239,7 +1375,7 @@ def _material_sammeln(auftrag_id: str, p: dict, arbeit: Path,
         # entbehrlich, und sieben Minuten Wartezeit für ein Bild, das nicht vorkommt,
         # sind schlicht verschenkt.
         vorab = fokus_bestimmen(bilder, material["texte"], p.get("fokus", "auto"))
-        if vorab["fokus"] == "marke" and len(bilder) >= 4:
+        if vorab["fokus"] == "produkt" and len(bilder) >= 4:
             logbook.info(QUELLE, "Genug eigene Fotos — auf die Bildschirmaufnahme wird "
                                  "verzichtet (sie käme im Marken-Film nicht vor).",
                          job=auftrag_id)
@@ -1259,7 +1395,14 @@ def _material_sammeln(auftrag_id: str, p: dict, arbeit: Path,
 
     elif quelle == "ordner":
         _fortschritt(auftrag_id, "material", 0.3, 30, "Projektordner wird gelesen")
-        gezaehlt = projekt_auszug(Path(p["projektordner"]), arbeit / "quelle")
+        if not Path(p["projektordner"]).is_dir():
+            raise errors.EingabeFehler(
+                "Den Projektordner gibt es nicht mehr.",
+                f"Geprüft wurde: {p['projektordner'][:160]}", ursprung=QUELLE)
+        gezaehlt = projekt_auszug(Path(p["projektordner"]), arbeit / "quelle", abbruch)
+        if gezaehlt.get("geheim"):
+            logbook.info(QUELLE, f"{gezaehlt['geheim']} Datei(en) mit möglichen Zugangsdaten "
+                                 "wurden nicht übernommen.", job=auftrag_id)
         teile.append(f"{gezaehlt['texte']} Textdatei(en), {gezaehlt['bilder']} Bild(er), "
                      f"{gezaehlt['schriften']} Schrift(en)")
         material["leseproben"] = _leseproben(arbeit / "quelle")
@@ -1283,13 +1426,31 @@ def _material_sammeln(auftrag_id: str, p: dict, arbeit: Path,
 
 # ── Ausgabe ──────────────────────────────────────────────────────────────────
 
-def _gerenderte_videos(arbeit: Path) -> list[tuple[Path, object]]:
-    """Alle brauchbaren MP4 des Agenten, mit ihren Abmessungen."""
+#: Ordner im Arbeitsordner, die Material enthalten und nie ein Ergebnis des Agenten.
+_KEIN_ERGEBNIS = {"assets", "node_modules", "snapshots", "material", "quelle", "bilder",
+                  "aufnahme", "rezept"}
+
+
+def _gerenderte_videos(arbeit: Path, seit: float = 0.0) -> list[tuple[Path, object]]:
+    """Alle brauchbaren MP4 des Agenten, mit ihren Abmessungen.
+
+    Gesucht wird in `brag-output/`, wo der Auftrag sie verlangt; nur wenn dort nichts
+    liegt, im übrigen Arbeitsordner — aber nie im Material. Ein hochgeladener 4K-Clip
+    wurde sonst als „fertiger Film“ ausgeliefert. `seit` lässt nur Dateien gelten, die
+    während dieses Laufs entstanden sind: Rendert eine Aufwertung nichts Neues, darf der
+    alte Film nicht als neues Ergebnis durchgehen.
+    """
+    ausgabe = arbeit / "brag-output"
+    kandidaten = sorted(ausgabe.rglob("*.mp4")) if ausgabe.is_dir() else []
+    if not kandidaten:
+        kandidaten = sorted(arbeit.rglob("*.mp4"))
     gefunden = []
-    for pfad in sorted(arbeit.rglob("*.mp4")):
-        if any(teil in ("assets", "node_modules", "snapshots") for teil in pfad.parts):
+    for pfad in kandidaten:
+        if any(teil in _KEIN_ERGEBNIS for teil in pfad.relative_to(arbeit).parts[:-1]):
             continue
         try:
+            if seit and pfad.stat().st_mtime < seit - 2:
+                continue
             # Nur leere Hüllen aussortieren. Über die Größe zu urteilen, führt in die
             # Irre: Ein sauber gerenderter Film mit ruhigem Bild kann winzig sein, und
             # ein abgebrochener mit Rauschen groß. Was zählt, prüft `media.angaben()`
@@ -1305,9 +1466,9 @@ def _gerenderte_videos(arbeit: Path) -> list[tuple[Path, object]]:
 
 
 def _ausgabe(auftrag_id: str, e, p: dict, titel: str, ordner: Path, arbeit: Path,
-             lauf, abbruch: threading.Event) -> dict:
+             lauf, abbruch: threading.Event, seit: float = 0.0) -> dict:
     """Sortiert die gerenderten Videos in die Bibliothek ein."""
-    videos = _gerenderte_videos(arbeit)
+    videos = _gerenderte_videos(arbeit, seit)
     if not videos:
         raise errors.VerarbeitungsFehler(
             "Es ist kein fertiges Video entstanden.",
@@ -1321,14 +1482,20 @@ def _ausgabe(auftrag_id: str, e, p: dict, titel: str, ordner: Path, arbeit: Path
                key=lambda v: v[1].breite * v[1].hoehe, default=None)
 
     ausgefallen: list[str] = []
+    film = ordner / "film.mp4"
     if quer is None:
         # Nur Hochformat entstanden: Das Querformat wird daraus geschnitten, damit der
         # Kunde nicht mit einer halben Lieferung dasteht — mit Vermerk.
-        quer = hoch
-        ausgefallen.append("Querformat wurde aus dem Hochformat abgeleitet")
-
-    film = ordner / "film.mp4"
-    shutil.copy2(quer[0], film)
+        try:
+            media.format_erzeugen(hoch[0], film, "breit", abbruch=abbruch)
+            ausgefallen.append("Querformat wurde aus dem Hochformat abgeleitet")
+        except errors.StudioFehler as fehler:
+            logbook.warnung(QUELLE, f"Querformat ließ sich nicht ableiten: {fehler.meldung}",
+                            job=auftrag_id)
+            shutil.copy2(hoch[0], film)
+            ausgefallen.append("nur das Hochformat ist entstanden")
+    else:
+        shutil.copy2(quer[0], film)
     angaben = media.angaben(film)
 
     fassungen: dict[str, str] = {}
@@ -1346,8 +1513,11 @@ def _ausgabe(auftrag_id: str, e, p: dict, titel: str, ordner: Path, arbeit: Path
 
     # Poster: das des Agenten, sonst selbst ziehen.
     poster = ordner / "film_poster.jpg"
-    agentenposter = next((pf for pf in sorted(arbeit.rglob("*.jpg"))
-                          if pf.stem in ("brag", "poster", "brag-hochformat")), None)
+    ausgabe = arbeit / "brag-output"
+    agentenposter = next((pf for pf in (sorted(ausgabe.rglob("*.jpg"))
+                                        if ausgabe.is_dir() else [])
+                          if pf.stem in ("brag", "poster", "brag-hochformat")
+                          and pf.stat().st_mtime >= seit - 2), None)
     try:
         if agentenposter is not None:
             shutil.copy2(agentenposter, poster)
@@ -1361,7 +1531,8 @@ def _ausgabe(auftrag_id: str, e, p: dict, titel: str, ordner: Path, arbeit: Path
     for name, ziel in (("brag-plan.md", "plan.md"),
                        ("composition-brief.md", "komposition-brief.md"),
                        ("share-copy.txt", "posting-vorschlag.txt")):
-        gefunden = next(iter(sorted(arbeit.rglob(name))), None)
+        gefunden = next(iter(sorted(ausgabe.rglob(name)) if ausgabe.is_dir() else []),
+                        None)
         if gefunden is not None:
             try:
                 shutil.copy2(gefunden, ordner / ziel)

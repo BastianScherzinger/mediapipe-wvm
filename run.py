@@ -210,6 +210,13 @@ def main() -> int:
     except Exception:
         pass
 
+    # Nie abgeholte Materialkörbe des Premium-Films wegräumen (älter als 24 h).
+    try:
+        from app import bragstudio
+        bragstudio.koerbe_aufraeumen()
+    except Exception:
+        pass
+
     if argumente.kein_fenster:
         try:
             while dienst.is_alive():

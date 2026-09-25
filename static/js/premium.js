@@ -378,7 +378,10 @@
       return;
     }
     $("#pr-prompt-box").hidden = true;
-    await MPW.start.auftragAbschicken(auftrag, zeile);
+    const angenommen = await MPW.start.auftragAbschicken(auftrag, zeile);
+    // Abgewiesen (etwa „Diesen Ordner gibt es nicht“): Das Material bleibt ausgewählt,
+    // sonst lägen die Dateien verwaist im Korb und der Kunde müsste neu hochladen.
+    if (!angenommen) return;
     // Der Korb ist nach dem Start verbraucht — der Auftrag hat ihn übernommen.
     zustand.korb = "";
     zustand.material = [];

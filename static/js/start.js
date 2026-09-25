@@ -158,7 +158,8 @@
   }
 
   /** Schickt einen fertigen Auftrag ab — vom Formular wie von der Webseiten-Seite.
-   *  `melde(text, art)` schreibt in die Statuszeile des Bereichs, der ihn abgeschickt hat. */
+   *  `melde(text, art)` schreibt in die Statuszeile des Bereichs, der ihn abgeschickt hat.
+   *  Gibt zurück, ob der Server den Auftrag angenommen hat. */
   async function auftragAbschicken(auftrag, melde) {
     // Läuft schon etwas, wird dieser Auftrag eingereiht statt abgewiesen. Der Ablauf
     // rechts darf dann NICHT zurückgesetzt werden — dort läuft ja noch der andere.
@@ -169,9 +170,11 @@
     try {
       const antwort = await MPW.hole("/api/auftrag", { koerper: auftrag });
       nachDemAbschicken(antwort, melde);
+      return true;
     } catch (fehler) {
       melde(fehler.meldung || fehler.message, "fehler");
       MPW.melden(fehler.message, "fehler", 9000);
+      return false;
     }
   }
 

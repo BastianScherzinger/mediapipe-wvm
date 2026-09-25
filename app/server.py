@@ -280,7 +280,7 @@ def anwendung_bauen() -> Flask:
 
         Die Dateien landen in einem Korb unter `data/material/<korb>`; der Auftrag holt
         sie sich beim Start ab und leert ihn. Ein Korb, der nie abgeholt wird, ist eine
-        Handvoll Bilder — er wird beim nächsten Programmstart mit aufgeräumt.
+        Handvoll Bilder — `bragstudio.koerbe_aufraeumen()` räumt ihn beim Start nach 24 h weg.
         """
         korb = request.form.get("korb") or ""
         dateien = request.files.getlist("dateien")
@@ -311,9 +311,14 @@ def anwendung_bauen() -> Flask:
                 "Ohne die vorhandene Komposition lässt sich nichts aufwerten — "
                 "bitte einen neuen Film bauen.", ursprung=QUELLE)
 
+        if bragstudio.aufwertung_offen(vorher.id):
+            raise errors.EingabeFehler(
+                "Dieser Film wird schon aufgewertet.",
+                "Bitte warten, bis die laufende Aufwertung fertig ist.", ursprung=QUELLE)
+
         roh = {**(vorher.einstellungen or {}), "art": "premium"}
         roh["aufwerten_von"] = vorher.id
-        roh["wunsch"] = str(daten.get("maengel") or daten.get("wunsch") or "")[:2000]
+        roh["maengel"] = str(daten.get("maengel") or daten.get("wunsch") or "")[:2000]
         # Eine Nachbesserung darf mit einem anderen Modell laufen als der Neubau: Das
         # Konzept steht, es geht nur noch um Handwerk — und ein knappes Kontingent
         # reicht mit dem kleineren Modell für mehrere Runden statt für eine.

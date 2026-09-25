@@ -125,7 +125,22 @@ def befund() -> dict:
 
 # ── Werkzeuge bereitstellen ──────────────────────────────────────────────────
 
+def _programm(name: str) -> str:
+    """Voller Pfad eines Hilfsprogramms — unter Windows auch dessen `.cmd`-Hülle.
+
+    `subprocess` ohne Shell findet unter Windows nur `.exe`-Dateien. `npx` liegt dort als
+    `npx.cmd` vor; ohne diese Auflösung scheiterte die Einrichtung der Hyperframes-Skills
+    auf jedem frischen Windows-Rechner mit „Datei nicht gefunden“.
+    """
+    for kandidat in (f"{name}.cmd", f"{name}.exe", name):
+        gefunden = shutil.which(kandidat)
+        if gefunden:
+            return gefunden
+    return name
+
+
 def _lauf(befehl: list[str], *, zeitlimit: int, cwd: "Path | None" = None) -> tuple[int, str]:
+    befehl = [_programm(befehl[0]), *befehl[1:]]
     try:
         ergebnis = subprocess.run(befehl, capture_output=True, text=True, encoding="utf-8",
                                   errors="replace", timeout=zeitlimit,
@@ -252,12 +267,54 @@ def _binordner() -> Path:
 
 # ── Der Lauf ─────────────────────────────────────────────────────────────────
 
+def _gruppe_starten() -> dict:
+    """Startoptionen, die den Agenten samt allen Kindern in eine eigene Gruppe legen.
+
+    Nur so lässt er sich beim Abbruch vollständig beenden: Unter Windows ist die CLI eine
+    `.cmd`-Hülle, und `terminate()` träfe allein `cmd.exe` — Node, `hyperframes render`
+    und dessen Browser liefen weiter und schrieben in den Auftragsordner.
+    """
+    if os.name == "nt":
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)}
+    return {"start_new_session": True}
+
+
+def _baum_beenden(prozess: subprocess.Popen) -> None:
+    """Beendet einen Prozess mitsamt allen Kindprozessen."""
+    if prozess.poll() is not None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(prozess.pid)],
+                           capture_output=True, timeout=30)
+        else:
+            import signal
+            os.killpg(os.getpgid(prozess.pid), signal.SIGTERM)
+    except (OSError, subprocess.SubprocessError):
+        prozess.terminate()
+    try:
+        prozess.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        if os.name != "nt":
+            try:
+                import signal
+                os.killpg(os.getpgid(prozess.pid), signal.SIGKILL)
+            except OSError:
+                pass
+        prozess.kill()
+        try:
+            prozess.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+
+
 #: Was der Agent nicht zu sehen braucht. Er baut einen Film aus Dateien im
 #: Auftragsordner — mit dem Higgsfield-Schlüssel oder einem Zahlungszugang hat das
 #: nichts zu tun. Was ein Prozess nicht kennt, kann er auch nicht versehentlich in eine
 #: Datei, ein Protokoll oder einen Netzaufruf schreiben.
 _GEHEIM = ("HIGGSFIELD", "OPENAI", "AWS_", "GOOGLE_", "GCP_", "AZURE", "STRIPE",
-           "PAYPAL", "SECRET", "PASSWORD", "PASSWD")
+           "PAYPAL", "SECRET", "PASSWORD", "PASSWD", "TOKEN", "API_KEY", "APIKEY",
+           "ACCESS_KEY", "PRIVATE_KEY", "CREDENTIAL", "ANTHROPIC_KEY")
 
 
 def _ohne_geheimnisse(umgebung: dict) -> dict:
@@ -328,7 +385,8 @@ def lauf(arbeitsordner: Path, prompt: str, *, modell: str = "", zeitlimit: int =
 
     `melden(text, art)` bekommt jede Regung des Agenten — Werkzeugaufrufe, Zwischentexte.
     Zurück kommt der Schlusstext samt Abrechnung. Ein Abbruchwunsch beendet den Lauf
-    innerhalb einer Sekunde; angefangene Dateien bleiben liegen, damit ein zweiter
+    samt aller Kindprozesse innerhalb weniger Sekunden, auch wenn der Agent gerade
+    nichts ausgibt; angefangene Dateien bleiben liegen, damit ein zweiter
     Anlauf darauf aufbauen kann.
     """
     pfad = config.claude_cli_pfad()
@@ -366,7 +424,7 @@ def lauf(arbeitsordner: Path, prompt: str, *, modell: str = "", zeitlimit: int =
         prozess = subprocess.Popen(
             befehl, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-            bufsize=1, cwd=str(arbeitsordner), env=umgebung)
+            bufsize=1, cwd=str(arbeitsordner), env=umgebung, **_gruppe_starten())
     except OSError as fehler:
         raise errors.KonfigurationsFehler(
             "Die Claude-CLI ließ sich nicht starten.", f"Systemmeldung: {fehler}",
@@ -387,15 +445,30 @@ def lauf(arbeitsordner: Path, prompt: str, *, modell: str = "", zeitlimit: int =
     except OSError:
         pass
 
-    abgebrochen = False
+    # Abbruch und Zeitlimit überwacht ein eigener Faden: Die Schleife unten wartet auf
+    # die nächste Zeile des Agenten, und ein Werkzeugaufruf wie `hyperframes render`
+    # kann minutenlang nichts ausgeben. Ohne Wächter wirkte „Abbrechen“ erst danach.
+    grund: dict = {}
+    fertig = threading.Event()
+
+    def waechter() -> None:
+        while not fertig.wait(1.0):
+            if prozess.poll() is not None:
+                return
+            if abbruch is not None and abbruch.is_set():
+                grund["art"] = "abbruch"
+            elif time.monotonic() - begonnen > zeitlimit:
+                grund["art"] = "zeit"
+                fehlertext.append(f"Zeitlimit von {zeitlimit} s überschritten")
+            else:
+                continue
+            _baum_beenden(prozess)
+            return
+    threading.Thread(target=waechter, daemon=True).start()
+
     try:
         for zeile in prozess.stdout or []:
-            if abbruch is not None and abbruch.is_set():
-                abgebrochen = True
-                break
-            if time.monotonic() - begonnen > zeitlimit:
-                abgebrochen = True
-                fehlertext.append(f"Zeitlimit von {zeitlimit} s überschritten")
+            if grund:
                 break
             zeile = zeile.strip()
             if not zeile or not zeile.startswith("{"):
@@ -406,17 +479,15 @@ def lauf(arbeitsordner: Path, prompt: str, *, modell: str = "", zeitlimit: int =
                 continue
             _satz_verarbeiten(satz, ergebnis, melden)
     finally:
-        if prozess.poll() is None:
-            prozess.terminate()
-            try:
-                prozess.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                prozess.kill()
+        fertig.set()
+        _baum_beenden(prozess)
 
     ergebnis.dauer = time.monotonic() - begonnen
 
-    if abgebrochen:
-        if abbruch is not None and abbruch.is_set():
+    if not grund and abbruch is not None and abbruch.is_set():
+        grund["art"] = "abbruch"
+    if grund:
+        if grund["art"] == "abbruch":
             raise errors.AbbruchFehler("Abgebrochen.", ursprung=QUELLE)
         raise errors.ZeitFehler(
             f"Der Filmbau hat das Zeitlimit von {zeitlimit // 60} Minuten überschritten.",
