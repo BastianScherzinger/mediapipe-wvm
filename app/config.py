@@ -106,11 +106,12 @@ VIDEO_CHAIN: tuple[str, ...] = _chain("MPW_VIDEO_CHAIN", "platform,demo",
 CLAUDE_CLI_MODEL: str = _str("MPW_CLAUDE_CLI_MODEL", "sonnet")
 
 # ── Premium-Film (Claude baut die Komposition selbst) ────────────────────────
-# Hier steht bewusst das stärkste Modell: Der Agent entwirft Layout, Typografie und
-# Timing eines Films, der verkauft werden soll. Ein schwächeres Modell spart ein paar
-# Euro und kostet eine Nachbesserungsrunde — beim Preis eines solchen Videos ist das
-# die falsche Ersparnis. Umstellbar über die .env und je Auftrag in der Oberfläche.
-BRAG_MODEL: str = _str("MPW_BRAG_MODEL", "claude-opus-5")
+# Vorgabe ist Sonnet (Entscheidung vom 18.09.2026): etwa ein Fünftel des Kontingents
+# eines Opus-Laufs, und mit den Regeln aus bragvorlage/ trägt es die meisten Filme.
+# Opus bleibt je Auftrag in der Oberfläche wählbar, auch beim Aufwerten. Bis zum
+# 25.09.2026 stand hier noch Opus — die Umstellung stand nur in .env.example, und die
+# .env des Kunden enthält die Zeile nicht.
+BRAG_MODEL: str = _str("MPW_BRAG_MODEL", "claude-sonnet-5")
 #: Modelle, die in der Oberfläche zur Wahl stehen.
 BRAG_MODELLE: tuple[tuple[str, str], ...] = (
     ("claude-opus-5", "Opus 5 — beste Qualität"),
