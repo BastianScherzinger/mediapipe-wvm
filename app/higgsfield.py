@@ -47,6 +47,12 @@ _MEDIEN_MUSTER = re.compile(r'https?://[^\s"\'\\<>]+?\.(?:mp4|mov|webm|jpg|jpeg|
 # Vorgabewerte für die Restzeit, bis eigene Messwerte vorliegen (Sekunden).
 _ERFAHRUNG_VORGABE = {"bild": 25.0, "video": 150.0}
 
+# Wann eine Auftragsnummer, die der Dienst mit 404 beantwortet, als unbekannt gilt:
+# nach so vielen 404 in Folge bei einem fortgesetzten Auftrag, sonst nach so vielen
+# Sekunden ununterbrochener 404.
+_UNBEKANNT_SERIE = 3
+_UNBEKANNT_SEKUNDEN = 60.0
+
 
 # ── Laufzeitgedächtnis ───────────────────────────────────────────────────────
 
@@ -292,9 +298,15 @@ class Higgsfield:
             _guthaben.merken(True, f"Auftrag an {modell} angenommen")
             kennung = daten.get("request_id") or daten.get("id") or daten.get("generation_id")
             if not kennung:
-                raise errors.AnbieterFehler(
-                    "Higgsfield hat keine Auftragsnummer zurückgegeben.",
-                    f"Antwort des Dienstes: {text[:200]}", ursprung=QUELLE)
+                # Angenommen (200), aber ohne Nummer: vielleicht bezahlt. Ein gewöhnlicher
+                # Szenenfehler hieße, die nächste Szene kauft neu — deshalb UnklarFehler,
+                # der den Lauf beendet und nie wiederholt wird (wie im Abo-Weg).
+                raise errors.UnklarFehler(
+                    "Higgsfield hat den Auftrag angenommen, aber keine Auftragsnummer "
+                    "zurückgegeben.",
+                    "Ob er abgerechnet wurde, ist unklar — bitte unter cloud.higgsfield.ai "
+                    "nachsehen, bevor erneut gestartet wird. Antwort des Dienstes: "
+                    f"{config.entschaerfe(text[:200])}", ursprung=QUELLE)
             return str(kennung), str(daten.get("status_url") or
                                      f"{self.basis}/requests/{kennung}/status")
 
@@ -308,7 +320,10 @@ class Higgsfield:
         Anlegen kann vorkommen, weil der Auftrag noch nicht überall bekannt ist."""
         code, daten, text = self._anfrage("GET", status_url, zeitlimit=20)
         if code == 404:
-            return {"status": "queued", "_hinweis": "noch nicht bekannt"}
+            # `_nicht_gefunden` lässt `warten` mitzählen: Ein einzelnes 404 ist normal,
+            # eine lange Serie heißt, dass es den Auftrag beim Dienst nicht (mehr) gibt.
+            return {"status": "queued", "_hinweis": "noch nicht bekannt",
+                    "_nicht_gefunden": True}
         if code >= 400:
             raise errors.aus_httpfehler(code, text, ursprung=QUELLE)
         return daten
@@ -329,18 +344,25 @@ class Higgsfield:
 
     def warten(self, request_id: str, status_url: str, *, modell: str, art: str,
                abbruch: threading.Event | None = None,
-               melden=None) -> Ergebnis:
+               melden=None, fortgesetzt: bool = False) -> Ergebnis:
         """Wartet bis zum Ergebnis und meldet unterwegs den Fortschritt.
 
         `melden(anteil, restsekunden, zustand)` wird bei jeder Abfrage aufgerufen. Der
         Anteil ist eine ehrliche Schätzung aus der bisherigen Laufzeit im Verhältnis zur
         Erfahrung — er wird bei 95 % gedeckelt, damit die Anzeige nicht stehenbleibt und
         auch nicht lügt.
+
+        `fortgesetzt` heißt: Die Nummer stammt aus einem früheren Lauf. Kennt der Dienst
+        sie dreimal hintereinander nicht, gibt es den Auftrag nicht (mehr) — dann darf die
+        Ablaufsteuerung neu bestellen, statt eine Viertelstunde auf nichts zu warten.
+        Bei einem frischen Auftrag gilt dasselbe nach einer Minute ununterbrochener 404.
         """
         begonnen = time.monotonic()
         erwartet = _laufzeiten.schaetzung(modell, art)
         letzter_zustand = ""
         fehlversuche = 0
+        unbekannt_serie = 0
+        unbekannt_seit: float | None = None
 
         while True:
             if abbruch is not None and abbruch.is_set():
@@ -367,6 +389,21 @@ class Higgsfield:
                 logbook.debug(QUELLE, f"Statusabfrage gestört ({fehler.art}) — weiter.")
                 time.sleep(config.POLL_INTERVAL)
                 continue
+
+            if stand.get("_nicht_gefunden"):
+                unbekannt_serie += 1
+                if unbekannt_seit is None:
+                    unbekannt_seit = time.monotonic()
+                if ((fortgesetzt and unbekannt_serie >= _UNBEKANNT_SERIE) or
+                        time.monotonic() - unbekannt_seit >= _UNBEKANNT_SEKUNDEN):
+                    raise errors.AnbieterFehler(
+                        "Higgsfield kennt den Auftrag nicht (mehr).",
+                        "Der Dienst meldet die Auftragsnummer wiederholt als unbekannt.",
+                        ursprung=QUELLE, details={"request_id": request_id,
+                                                  "endzustand": "unbekannt"})
+            else:
+                unbekannt_serie = 0
+                unbekannt_seit = None
 
             zustand = str(stand.get("status") or "").lower()
             if zustand and zustand != letzter_zustand:
@@ -403,7 +440,18 @@ class Higgsfield:
                                               "endzustand": zustand})
 
             if zustand in _ABGEBROCHEN:
-                raise errors.AbbruchFehler("Der Auftrag wurde storniert.", ursprung=QUELLE)
+                # Nur ein Abbruch des Benutzers ist ein Abbruch. Hat der Dienst selbst
+                # storniert, ist das ein gescheiterter Auftrag — die Ablaufsteuerung darf
+                # ihn dann genau einmal neu bestellen (`endzustand`).
+                if abbruch is not None and abbruch.is_set():
+                    raise errors.AbbruchFehler("Auftrag vom Benutzer abgebrochen.",
+                                               ursprung=QUELLE)
+                raise errors.AnbieterFehler(
+                    "Higgsfield hat den Auftrag storniert.",
+                    "Der Auftrag wurde beim Dienst abgebrochen, nicht vom Programm. Das "
+                    "Guthaben wird bei einer Stornierung erstattet.",
+                    ursprung=QUELLE, details={"request_id": request_id,
+                                              "endzustand": zustand})
 
             if melden:
                 anteil = min(0.95, vergangen / erwartet) if erwartet > 0 else 0.5
@@ -462,6 +510,15 @@ class Higgsfield:
             try:
                 with httpx.Client(timeout=180, follow_redirects=True) as klient:
                     with klient.stream("GET", url, headers={"User-Agent": _UA}) as antwort:
+                        if antwort.status_code in (401, 403):
+                            # Die Ergebnisadresse braucht keinen API-Schlüssel — ein
+                            # Hinweis auf HIGGSFIELD_API_KEY führte hier in die Irre.
+                            raise errors.AnbieterFehler(
+                                f"Download abgelehnt (Code {antwort.status_code}).",
+                                "Die Ergebnisadresse ist abgelaufen oder gesperrt. Das "
+                                "Ergebnis steht bei Higgsfield unter den letzten "
+                                "Erzeugungen; bitte „Erneut versuchen“ klicken.",
+                                ursprung=QUELLE, details={"code": antwort.status_code})
                         if antwort.status_code >= 400:
                             raise errors.aus_httpfehler(antwort.status_code,
                                                         "Download abgelehnt", ursprung=QUELLE)
@@ -524,7 +581,7 @@ class Higgsfield:
                 except Exception:
                     pass
         return self.warten(kennung, status_url, modell=modell, art=art,
-                           abbruch=abbruch, melden=melden)
+                           abbruch=abbruch, melden=melden, fortgesetzt=bool(fortsetzen))
 
     def bild(self, prompt: str, *, seitenverhaeltnis: str = "16:9", aufloesung: str = "1080p",
              modell: str = "", verbessern: bool = True, saat: int | None = None,

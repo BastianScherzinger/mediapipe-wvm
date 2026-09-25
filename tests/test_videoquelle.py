@@ -179,7 +179,11 @@ def test_leere_kette_faellt_auf_platform_zurueck(monkeypatch):
     assert videoquelle._reihenfolge() == ["platform"]
 
 
-def test_uebersicht_nennt_alle_drei_wege():
+def test_uebersicht_nennt_alle_drei_wege(monkeypatch):
+    # Der Selbsttest der Platform-API ist ein echter Aufruf — hier nur eine Attrappe.
+    monkeypatch.setattr(higgsfield.client, "selbsttest", lambda: {
+        "zustand": "kein_schluessel", "ok": False, "guthaben": "unbekannt",
+        "meldung": "Attrappe", "hinweis": ""})
     wege = videoquelle.uebersicht()
     assert {w["weg"] for w in wege} == {"platform", "abo", "demo"}
     assert all("meldung" in w for w in wege)

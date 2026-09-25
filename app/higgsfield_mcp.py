@@ -39,6 +39,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
+import os
 import re
 import secrets
 import threading
@@ -134,26 +136,88 @@ _MODELLE: dict = {"zeit": 0.0, "liste": []}
 _MODELLE_FRISCHE = 3600.0
 
 _anmeldedatei = config.DATA_DIR / "higgsfield_abo.json"
+_werkzeugdatei = config.DATA_DIR / "higgsfield_werkzeuge.json"
 _sperre = threading.Lock()
 _auskunft: dict = {}
+
+#: Hält die Token-Erneuerung zusammen. Ohne sie erneuern zwei Fäden gleichzeitig — und
+#: bei rotierenden Erneuerungstoken macht der zweite das Token des ersten ungültig.
+_token_sperre = threading.Lock()
+
+#: Diese Felder der Anmeldedatei sind Zugangsdaten und dürfen nie ins Logbuch.
+_GEHEIME_FELDER = ("access_token", "refresh_token", "client_secret")
 
 
 # ── Anmeldedaten auf der Platte ──────────────────────────────────────────────
 
+def _geheimnisse_melden(daten: dict) -> None:
+    """Meldet die Zugangsdaten der Anmeldung bei `config.entschaerfe()` an."""
+    for feld in _GEHEIME_FELDER:
+        wert = daten.get(feld) if isinstance(daten, dict) else None
+        if isinstance(wert, str) and wert:
+            config.geheimnis_merken(wert)
+
+
 def _laden() -> dict:
     try:
-        return json.loads(_anmeldedatei.read_text(encoding="utf-8"))
+        daten = json.loads(_anmeldedatei.read_text(encoding="utf-8"))
     except Exception:
         return {}
+    if not isinstance(daten, dict):
+        return {}
+    _geheimnisse_melden(daten)
+    return daten
 
 
 def _speichern(daten: dict) -> None:
+    _geheimnisse_melden(daten)
+    # Eindeutiger Name je Schreibvorgang: Zwei Fäden, die gleichzeitig speichern, dürfen
+    # sich nicht gegenseitig die halb geschriebene Zwischendatei unterschieben.
+    vorlaeufig = _anmeldedatei.with_name(
+        f"{_anmeldedatei.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
     try:
-        vorlaeufig = _anmeldedatei.with_suffix(".tmp")
         vorlaeufig.write_text(json.dumps(daten, indent=2), encoding="utf-8")
         vorlaeufig.replace(_anmeldedatei)
     except Exception as fehler:
         logbook.warnung(QUELLE, f"Anmeldedaten nicht gespeichert: {type(fehler).__name__}")
+        try:
+            vorlaeufig.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _json_oder_leer(antwort) -> dict:
+    """Der Rumpf einer Antwort als Objekt — oder leer, wenn er keins ist."""
+    try:
+        daten = antwort.json()
+    except Exception:
+        return {}
+    return daten if isinstance(daten, dict) else {}
+
+
+def _gueltig_bis(marken: dict) -> float:
+    """Ablaufzeitpunkt aus `expires_in` — verträgt fehlende und unsinnige Werte."""
+    try:
+        sekunden = float(marken.get("expires_in", 3600))
+    except (TypeError, ValueError):
+        sekunden = 3600.0
+    if not math.isfinite(sekunden) or sekunden <= 0:
+        sekunden = 3600.0
+    return time.time() + min(sekunden, 30 * 86400) - 60
+
+
+def _tokenfehler(code: int, meldung: str, hinweis: str) -> errors.StudioFehler:
+    """Abgelehnte Antwort des Token-Endpunkts bewerten.
+
+    5xx und 429 sind Störungen des Dienstes, kein Urteil über die Anmeldung — dann wird
+    wiederholt statt den Kunden zur Neuanmeldung zu schicken.
+    """
+    if code == 429 or 500 <= code < 600:
+        return errors.NetzFehler(
+            f"Der Higgsfield-Anmeldedienst ist gerade gestört (Code {code}).",
+            "Meist vorübergehend — das Programm versucht es erneut.",
+            ursprung=QUELLE, details={"code": code})
+    return errors.ZugangFehler(meldung, hinweis, ursprung=QUELLE, details={"code": code})
 
 
 def angemeldet() -> bool:
@@ -197,15 +261,31 @@ class _RueckrufEmpfaenger(BaseHTTPRequestHandler):
     """Nimmt die Antwort des Anmeldedienstes entgegen. Läuft nur während der Anmeldung."""
 
     ergebnis: dict = {}
+    #: Der Pfad, der bei der Registrierung als Rückrufadresse angegeben wurde.
+    pfad: str = "/callback"
 
     def do_GET(self):                                    # noqa: N802
-        felder = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-        _RueckrufEmpfaenger.ergebnis = {
+        adresse = urllib.parse.urlparse(self.path)
+        if adresse.path != _RueckrufEmpfaenger.pfad:
+            # Der Browser fragt nebenbei nach /favicon.ico und Ähnlichem. Solche Anfragen
+            # dürfen das Ergebnis nicht überschreiben — sonst lief die Anmeldung trotz
+            # Bestätigung ins Zeitlimit.
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        felder = urllib.parse.parse_qs(adresse.query)
+        neu = {
             "code": (felder.get("code") or [""])[0],
             "state": (felder.get("state") or [""])[0],
             "fehler": (felder.get("error") or [""])[0],
         }
-        geklappt = bool(_RueckrufEmpfaenger.ergebnis["code"])
+        vorher = _RueckrufEmpfaenger.ergebnis
+        # Ein schon eingegangenes Ergebnis bleibt: Ein zweiter Aufruf (Neuladen,
+        # Vorabruf des Browsers) darf einen empfangenen Code nicht wegwischen.
+        if not (vorher.get("code") or vorher.get("fehler")):
+            _RueckrufEmpfaenger.ergebnis = neu
+        geklappt = bool(_RueckrufEmpfaenger.ergebnis.get("code"))
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
@@ -241,9 +321,11 @@ def _registrieren(rueckruf_adresse: str) -> dict:
         raise errors.AnbieterFehler(
             f"Higgsfield lehnt die Anmeldung ab (Code {antwort.status_code}).",
             config.entschaerfe(antwort.text[:200]), ursprung=QUELLE)
-    daten = antwort.json()
-    return {"client_id": daten.get("client_id", ""),
-            "client_secret": daten.get("client_secret", "")}
+    daten = _json_oder_leer(antwort)
+    anwendung = {"client_id": str(daten.get("client_id") or ""),
+                 "client_secret": str(daten.get("client_secret") or "")}
+    _geheimnisse_melden(anwendung)
+    return anwendung
 
 
 def _pkce() -> tuple[str, str]:
@@ -311,7 +393,8 @@ def _anmelden(browser_oeffnen: bool, wartezeit: int) -> dict:
         try:
             _RueckrufEmpfaenger.ergebnis = {}
             empfaenger = HTTPServer(("127.0.0.1", port), _RueckrufEmpfaenger)
-            rueckruf_adresse = f"http://localhost:{port}/callback"
+            _RueckrufEmpfaenger.pfad = "/callback"
+            rueckruf_adresse = f"http://localhost:{port}{_RueckrufEmpfaenger.pfad}"
             break
         except OSError:
             continue
@@ -320,6 +403,7 @@ def _anmelden(browser_oeffnen: bool, wartezeit: int) -> dict:
             "Kein freier Port für die Anmeldung.",
             "Bitte andere Programme schließen und erneut versuchen.", ursprung=QUELLE)
 
+    gestartet = False
     try:
         anwendung = _registrieren(rueckruf_adresse)
         if not anwendung["client_id"]:
@@ -337,6 +421,7 @@ def _anmelden(browser_oeffnen: bool, wartezeit: int) -> dict:
             _anmeldung["url"] = adresse
 
         threading.Thread(target=empfaenger.serve_forever, daemon=True).start()
+        gestartet = True
         logbook.info(QUELLE, "Anmeldung gestartet — bitte im Browser bestätigen.")
         if browser_oeffnen:
             try:
@@ -352,8 +437,15 @@ def _anmelden(browser_oeffnen: bool, wartezeit: int) -> dict:
             time.sleep(0.4)
         rueckgabe = dict(_RueckrufEmpfaenger.ergebnis)
     finally:
+        # `shutdown()` wartet, bis `serve_forever` endet — lief es nie (Registrierung
+        # gescheitert), wartete es ewig. Also nur dann; freigegeben wird der Port immer.
+        if gestartet:
+            try:
+                empfaenger.shutdown()
+            except Exception:
+                pass
         try:
-            empfaenger.shutdown()
+            empfaenger.server_close()
         except Exception:
             pass
 
@@ -365,7 +457,10 @@ def _anmelden(browser_oeffnen: bool, wartezeit: int) -> dict:
             "Die Anmeldung wurde nicht bestätigt.",
             "Der Anmeldelink ist abgelaufen. Bitte erneut auf den Knopf klicken.",
             ursprung=QUELLE)
-    if rueckgabe.get("state") and rueckgabe["state"] != zustand:
+    if not rueckgabe.get("state") or not secrets.compare_digest(
+            str(rueckgabe["state"]), zustand):
+        # Fehlt der Zustand oder passt er nicht, stammt der Rückruf nicht aus dieser
+        # Anmeldung — dann wird der Code nicht eingelöst.
         raise errors.ZugangFehler(
             "Die Antwort passt nicht zur Anfrage.",
             "Sicherheitsabbruch — bitte erneut versuchen.", ursprung=QUELLE)
@@ -382,17 +477,22 @@ def _anmelden(browser_oeffnen: bool, wartezeit: int) -> dict:
         raise errors.NetzFehler("Der Abschluss der Anmeldung ist gescheitert.",
                                 "Internetverbindung prüfen.", ursprung=QUELLE) from fehler
     if antwort.status_code != 200:
-        raise errors.ZugangFehler(
+        raise _tokenfehler(
+            antwort.status_code,
             f"Higgsfield hat die Anmeldung abgelehnt (Code {antwort.status_code}).",
-            config.entschaerfe(antwort.text[:200]), ursprung=QUELLE)
+            config.entschaerfe(antwort.text[:200]))
 
-    marken = antwort.json()
+    marken = _json_oder_leer(antwort)
+    if not marken.get("access_token"):
+        raise errors.AnbieterFehler(
+            "Higgsfield hat die Anmeldung ohne Zugriffstoken beantwortet.",
+            "Bitte erneut auf „Higgsfield anmelden“ klicken.", ursprung=QUELLE)
     _speichern({
         "client_id": anwendung["client_id"],
         "client_secret": anwendung.get("client_secret", ""),
-        "access_token": marken.get("access_token", ""),
-        "refresh_token": marken.get("refresh_token", ""),
-        "gueltig_bis": time.time() + int(marken.get("expires_in", 3600)) - 60,
+        "access_token": str(marken.get("access_token") or ""),
+        "refresh_token": str(marken.get("refresh_token") or ""),
+        "gueltig_bis": _gueltig_bis(marken),
         "token_endpoint": auskunft["token_endpoint"],
         "angemeldet_am": time.time(),
     })
@@ -402,14 +502,39 @@ def _anmelden(browser_oeffnen: bool, wartezeit: int) -> dict:
 
 def _gueltiges_token() -> str:
     """Gibt ein brauchbares Zugriffstoken zurück und erneuert es bei Bedarf."""
+    return _token_holen("")
+
+
+def _token_erneuern(abgelehnt: str) -> str:
+    """Ein neues Zugriffstoken, weil der Dienst `abgelehnt` mit 401 abgewiesen hat.
+
+    Hat ein anderer Faden inzwischen schon erneuert, wird dessen Token genommen, statt
+    ein zweites Mal zu erneuern.
+    """
+    return _token_holen(abgelehnt or "\0")
+
+
+def _token_holen(abgelehnt: str) -> str:
+    # Unter der Sperre und mit frisch gelesener Datei: Wer hier wartet, findet oft schon
+    # das Token vor, das der Faden vor ihm geholt hat.
+    with _token_sperre:
+        return _token_holen_gesperrt(abgelehnt)
+
+
+def _token_holen_gesperrt(abgelehnt: str) -> str:
     daten = _laden()
     if not daten:
         raise errors.ZugangFehler(
             "Das Higgsfield-Abo ist nicht verbunden.",
             "Im Dashboard auf „Higgsfield anmelden“ klicken — einmalig, danach läuft es "
             "von allein.", ursprung=QUELLE)
-    if daten.get("access_token") and time.time() < float(daten.get("gueltig_bis", 0)):
-        return daten["access_token"]
+    try:
+        gueltig_bis = float(daten.get("gueltig_bis", 0))
+    except (TypeError, ValueError):
+        gueltig_bis = 0.0
+    token = daten.get("access_token")
+    if token and time.time() < gueltig_bis and (not abgelehnt or token != abgelehnt):
+        return token
 
     erneuerung = daten.get("refresh_token")
     if not erneuerung:
@@ -425,21 +550,28 @@ def _gueltiges_token() -> str:
         with httpx.Client(timeout=25, headers={"User-Agent": _UA}) as klient:
             antwort = klient.post(daten.get("token_endpoint") or
                                   _oauth_auskunft()["token_endpoint"], data=formular)
+    except errors.StudioFehler:
+        raise
     except Exception as fehler:
         raise errors.NetzFehler("Die Anmeldung ließ sich nicht auffrischen.",
                                 "Internetverbindung prüfen.", ursprung=QUELLE) from fehler
     if antwort.status_code != 200:
-        raise errors.ZugangFehler(
-            "Die Anmeldung ist nicht mehr gültig.",
-            "Bitte im Dashboard erneut anmelden.", ursprung=QUELLE)
+        raise _tokenfehler(antwort.status_code, "Die Anmeldung ist nicht mehr gültig.",
+                           "Bitte im Dashboard erneut anmelden.")
 
-    marken = antwort.json()
-    daten["access_token"] = marken.get("access_token", "")
-    daten["gueltig_bis"] = time.time() + int(marken.get("expires_in", 3600)) - 60
+    marken = _json_oder_leer(antwort)
+    neues = str(marken.get("access_token") or "")
+    if not neues:
+        # Eine 200 ohne lesbares Token ist eine Störung, kein Urteil über die Anmeldung.
+        raise errors.NetzFehler(
+            "Der Higgsfield-Anmeldedienst hat unlesbar geantwortet.",
+            "Meist vorübergehend — das Programm versucht es erneut.", ursprung=QUELLE)
+    daten["access_token"] = neues
+    daten["gueltig_bis"] = _gueltig_bis(marken)
     if marken.get("refresh_token"):
-        daten["refresh_token"] = marken["refresh_token"]      # Rotation mitmachen
+        daten["refresh_token"] = str(marken["refresh_token"])      # Rotation mitmachen
     _speichern(daten)
-    return daten["access_token"]
+    return neues
 
 
 # ── MCP-Aufrufe ──────────────────────────────────────────────────────────────
@@ -528,40 +660,70 @@ _UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
                    re.IGNORECASE)
 
 
-def _auftragsnummer(antwort) -> str:
+def _auftragsnummer(antwort, ausschliessen=()) -> str:
     """Die Auftragsnummer aus einer Werkzeugantwort, egal wo sie steckt.
 
     Erkannt werden: `results`/`jobs` als Liste von Objekten oder Kennungen, ein
     verschachteltes `job`/`data`/`result`/`generation`, die Kennung auf oberster Ebene —
     und zur Not eine UUID im Klartext der Antwort. Eine übersehene Nummer hieße: Der
     Auftrag läuft und ist bezahlt, aber niemand holt ihn ab.
+
+    `ausschliessen` sind Kennungen, die wir selbst geschickt haben — etwa die Nummer
+    des Startbilds in `medias`. Wiederholt der Dienst sie in seiner Antwort, ist das
+    **nicht** die Nummer des neuen Videoauftrags; sie zu nehmen hieße, statt des Videos
+    das Startbild abzuholen.
     """
     if not isinstance(antwort, dict):
         return ""
-    felder = ("id", "jobId", "job_id", "request_id", "generation_id")
+    fremd = {str(k).strip() for k in ausschliessen if k}
+
+    def brauchbar(wert) -> str:
+        text = str(wert).strip()
+        return "" if not text or text in fremd else text
+
+    felder = ("id", "jobId", "job_id", "request_id", "generation_id",
+              "task_id", "taskId", "uuid")
     for liste in (antwort.get("results"), antwort.get("jobs")):
         if isinstance(liste, list) and liste:
             erstes = liste[0]
             if isinstance(erstes, dict):
                 for feld in felder:
-                    if erstes.get(feld):
-                        return str(erstes[feld])
-            elif isinstance(erstes, str) and erstes.strip():
-                return erstes.strip()
+                    if erstes.get(feld) and brauchbar(erstes[feld]):
+                        return brauchbar(erstes[feld])
+            elif isinstance(erstes, str) and brauchbar(erstes):
+                return brauchbar(erstes)
     for feld in felder:
-        if antwort.get(feld) and not isinstance(antwort[feld], (dict, list)):
-            return str(antwort[feld])
+        if antwort.get(feld) and not isinstance(antwort[feld], (dict, list)) \
+                and brauchbar(antwort[feld]):
+            return brauchbar(antwort[feld])
     for behaelter in ("job", "data", "result", "generation"):
         tiefer = antwort.get(behaelter)
         if isinstance(tiefer, dict):
-            gefunden = _auftragsnummer(tiefer)
+            gefunden = _auftragsnummer(tiefer, ausschliessen)
             if gefunden:
                 return gefunden
     if isinstance(antwort.get("text"), str) and not antwort.get("error"):
-        treffer = _UUID.search(antwort["text"])
-        if treffer:
-            return treffer.group(0)
+        for treffer in _UUID.finditer(antwort["text"]):
+            if brauchbar(treffer.group(0)):
+                return treffer.group(0)
     return ""
+
+
+def _gesendete_kennungen(parameter) -> set[str]:
+    """Die Kennungen, die ein Auftrag in `medias` mitschickt (Startbild und Co.)."""
+    kennungen: set[str] = set()
+    if not isinstance(parameter, dict):
+        return kennungen
+    innen = parameter.get("params") if isinstance(parameter.get("params"), dict) \
+        else parameter
+    for eintrag in innen.get("medias") or []:
+        if isinstance(eintrag, dict):
+            for feld in ("value", "id", "media_id", "job_id"):
+                if isinstance(eintrag.get(feld), (str, int)) and str(eintrag[feld]).strip():
+                    kennungen.add(str(eintrag[feld]).strip())
+        elif isinstance(eintrag, (str, int)) and str(eintrag).strip():
+            kennungen.add(str(eintrag).strip())
+    return kennungen
 
 
 def _stand_abfragen(kennung: str) -> dict:
@@ -599,9 +761,20 @@ def _ergebnis(nachrichten: list, kennung: int) -> dict:
         if nachricht.get("id") != kennung:
             continue
         if "error" in nachricht:
+            fehler = nachricht["error"]
+            code = fehler.get("code") if isinstance(fehler, dict) else None
+            text = (str(fehler.get("message") or fehler) if isinstance(fehler, dict)
+                    else str(fehler))
+            if code == -32602 or "validation" in text.lower():
+                # „Invalid params“ ist eine Schemaprüfung vor jeder Abrechnung. Als
+                # Fehlertext im Ergebnis weitergereicht, kann die Formsuche in
+                # `_einreichen` die nächste Form probieren, statt aufzugeben.
+                if not any(w in text.lower() for w in ("invalid", "validation")):
+                    text = f"Invalid params: {text}"
+                return {"error": config.entschaerfe(text[:300])}
             raise errors.AnbieterFehler(
                 "Higgsfield meldet einen Fehler.",
-                config.entschaerfe(str(nachricht["error"])[:200]), ursprung=QUELLE)
+                config.entschaerfe(str(fehler)[:200]), ursprung=QUELLE)
         rueckgabe = nachricht.get("result")
         if isinstance(rueckgabe, dict):
             if isinstance(rueckgabe.get("structuredContent"), dict):
@@ -653,8 +826,47 @@ def werkzeug_rufen(name: str, argumente: dict, zeitlimit: int = 60) -> dict:
 
 def _rpc(methode: str, parameter: dict, zeitlimit: int = 60) -> dict:
     """Ein beliebiger MCP-Aufruf. `tools/call` ist der häufigste, aber nicht der
-    einzige: die Werkzeugliste kommt über `tools/list`."""
+    einzige: die Werkzeugliste kommt über `tools/list`.
+
+    Antwortet der Dienst mit 401, wird das Token einmal erneuert und der Aufruf einmal
+    wiederholt — auch bei einem bestellenden Werkzeug. Das verträgt sich mit der Regel
+    „nach dem Absenden einer Bestellung nie wiederholen“: Ein 401 heißt, der Dienst hat
+    die Anfrage vor jeder Verarbeitung abgewiesen; angenommen und bezahlt ist nichts.
+    """
+    # Bei einem bestellenden Werkzeug ist ein Fehler **nach** dem Absenden kein
+    # Netzproblem, sondern eine offene Frage: Der Auftrag kann längst angenommen und
+    # bezahlt sein. Dann wird nicht wiederholt (`UnklarFehler`). Nur ein Fehler beim
+    # Verbindungsaufbau beweist, dass nichts angekommen ist.
+    bestellend = (methode == "tools/call" and
+                  str(parameter.get("name", "")).startswith(("generate_", "create_")))
     token = _gueltiges_token()
+    antwort, kennung = _rpc_einmal(token, methode, parameter, zeitlimit, bestellend)
+    if antwort.status_code == 401:
+        token = _token_erneuern(token)
+        antwort, kennung = _rpc_einmal(token, methode, parameter, zeitlimit, bestellend)
+
+    if antwort.status_code == 401:
+        raise errors.ZugangFehler("Die Anmeldung ist abgelaufen.",
+                                  "Bitte im Dashboard erneut anmelden.", ursprung=QUELLE,
+                                  details={"code": 401})
+    if antwort.status_code == 403:
+        # Eigener Hinweis: Der Abo-Weg hat mit HIGGSFIELD_API_KEY nichts zu tun.
+        raise errors.ZugangFehler(
+            "Higgsfield verweigert dem Abo diesen Aufruf (Code 403).",
+            "Im Dashboard die Higgsfield-Anmeldung erneuern und unter higgsfield.ai "
+            "prüfen, ob der Tarif das gewählte Modell enthält.", ursprung=QUELLE,
+            details={"code": 403})
+    if bestellend and antwort.status_code >= 500 and antwort.status_code != 503:
+        raise _unklar(f"Code {antwort.status_code}")
+    if antwort.status_code >= 400:
+        raise errors.aus_httpfehler(antwort.status_code, antwort.text, ursprung=QUELLE)
+    return _ergebnis(_zerlegen(antwort), kennung)
+
+
+def _rpc_einmal(token: str, methode: str, parameter: dict, zeitlimit: int,
+                bestellend: bool) -> tuple[httpx.Response, int]:
+    """Sitzung eröffnen und den Aufruf einmal absenden. Gibt (Antwort, Kennung) zurück;
+    Antwortcodes bewertet der Aufrufer."""
     klient = _klient()
     try:
         # Sitzung eröffnen — manche Fassungen verlangen das vor jedem Aufruf.
@@ -664,6 +876,10 @@ def _rpc(methode: str, parameter: dict, zeitlimit: int = 60) -> dict:
             "params": {"protocolVersion": _PROTOKOLL, "capabilities": {},
                        "clientInfo": {"name": config.APP_NAME, "version":
                                       config.APP_VERSION}}})
+        if eroeffnung.status_code == 401:
+            # Schon die Eröffnung abgewiesen: Der eigentliche Aufruf geht gar nicht erst
+            # hinaus — so kann auch keine Bestellung unterwegs sein.
+            return eroeffnung, 1
         sitzung = (eroeffnung.headers.get("mcp-session-id") or
                    eroeffnung.headers.get("Mcp-Session-Id") or "")
         try:
@@ -680,12 +896,6 @@ def _rpc(methode: str, parameter: dict, zeitlimit: int = 60) -> dict:
         raise errors.NetzFehler("Keine Verbindung zu Higgsfield.",
                                 "Internetverbindung prüfen.", ursprung=QUELLE) from fehler
 
-    # Der eigentliche Aufruf. Bei einem bestellenden Werkzeug ist ein Fehler **nach**
-    # dem Absenden kein Netzproblem, sondern eine offene Frage: Der Auftrag kann längst
-    # angenommen und bezahlt sein. Dann wird nicht wiederholt (`UnklarFehler`). Nur ein
-    # Fehler beim Verbindungsaufbau beweist, dass nichts angekommen ist.
-    bestellend = (methode == "tools/call" and
-                  str(parameter.get("name", "")).startswith(("generate_", "create_")))
     kennung = secrets.randbelow(1_000_000) + 2
     try:
         antwort = klient.post(_MCP_URL, headers=_kopfzeilen(token, sitzung),
@@ -704,15 +914,7 @@ def _rpc(methode: str, parameter: dict, zeitlimit: int = 60) -> dict:
                                     ursprung=QUELLE) from fehler
         raise errors.NetzFehler("Keine Verbindung zu Higgsfield.",
                                 "Internetverbindung prüfen.", ursprung=QUELLE) from fehler
-
-    if antwort.status_code == 401:
-        raise errors.ZugangFehler("Die Anmeldung ist abgelaufen.",
-                                  "Bitte im Dashboard erneut anmelden.", ursprung=QUELLE)
-    if bestellend and antwort.status_code >= 500 and antwort.status_code != 503:
-        raise _unklar(f"Code {antwort.status_code}")
-    if antwort.status_code >= 400:
-        raise errors.aus_httpfehler(antwort.status_code, antwort.text, ursprung=QUELLE)
-    return _ergebnis(_zerlegen(antwort), kennung)
+    return antwort, kennung
 
 
 def _unklar(grund: str) -> errors.UnklarFehler:
@@ -1020,8 +1222,7 @@ def _schemata_ablegen(antwort) -> None:
     keine Zugangsdaten — nur, was der Dienst über seine Werkzeuge sagt.
     """
     try:
-        ziel = config.DATA_DIR / "higgsfield_werkzeuge.json"
-        ziel.write_text(json.dumps(antwort, ensure_ascii=False, indent=1)[:2_000_000],
+        _werkzeugdatei.write_text(json.dumps(antwort, ensure_ascii=False, indent=1)[:2_000_000],
                         encoding="utf-8")
     except Exception:
         pass
@@ -1579,6 +1780,38 @@ def _mit_geduld(aufgabe, *, beschreibung: str,
                                          ursprung=QUELLE)
 
 
+def _abfragepause(roh) -> float:
+    """Wie lange bis zur nächsten Standsabfrage.
+
+    Der Dienst schlägt mit `poll_after_seconds` selbst eine Pause vor. Der Wert ist
+    fremd und nicht verbürgt: Text, Unsinn, 0 oder eine Stunde dürfen weder eine
+    Dauerschleife noch ein scheinbar hängendes Programm erzeugen. Deshalb auf 1 bis 30
+    Sekunden begrenzt; ohne Vorschlag gilt die eigene Taktung.
+    """
+    vorschlag = roh.get("poll_after_seconds") if isinstance(roh, dict) else None
+    if vorschlag is None or vorschlag == "":
+        return float(config.POLL_INTERVAL)
+    try:
+        sekunden = float(vorschlag)
+    except (TypeError, ValueError):
+        return float(config.POLL_INTERVAL)
+    if not math.isfinite(sekunden):
+        return float(config.POLL_INTERVAL)
+    return max(1.0, min(30.0, sekunden))
+
+
+def _schlafen(sekunden: float, abbruch: threading.Event | None) -> None:
+    """In kleinen Schritten warten, damit ein Abbruch sofort greift."""
+    ende = time.monotonic() + max(0.0, sekunden)
+    while True:
+        if abbruch is not None and abbruch.is_set():
+            return
+        rest = ende - time.monotonic()
+        if rest <= 0:
+            return
+        time.sleep(min(0.25, rest))
+
+
 # ── Derselbe Umgang wie beim Platform-Client ─────────────────────────────────
 
 class HiggsfieldAbo:
@@ -1618,7 +1851,6 @@ class HiggsfieldAbo:
         modelle = [modell_aufloesen(wunsch, art)]
         protokoll: list[str] = []
         versuche = 0
-        nur_formfehler = True
         unbekannt = False
         letzter_grund = ""
         stelle = 0
@@ -1640,7 +1872,7 @@ class HiggsfieldAbo:
                 versuche += 1
                 argumente = {"params": parameter} if huelle else parameter
                 antwort = self._abschicken(werkzeug, argumente, modell, abbruch)
-                kennung = _auftragsnummer(antwort)
+                kennung = _auftragsnummer(antwort, _gesendete_kennungen(parameter))
                 if kennung:
                     _FORM_GEMERKT[(werkzeug, modell)] = bezeichnung
                     if protokoll:
@@ -1649,7 +1881,23 @@ class HiggsfieldAbo:
                                              f"{len(protokoll)} abgewiesenen Formen).")
                     return str(kennung), modell
 
-                grund = config.entschaerfe(_fehlertext(antwort) or str(antwort)[:200])
+                fehlertext = _fehlertext(antwort)
+                if not fehlertext:
+                    # Keine erkennbare Nummer, aber auch kein Fehler: Der Auftrag kann
+                    # angenommen und bezahlt sein, ohne dass wir ihn verfolgen können
+                    # („queued“ mit unbekanntem Feld, „Job started“, leere Ergebnisliste).
+                    # Eine andere Form oder die nächste Szene bestellte womöglich doppelt
+                    # — also den ganzen Lauf beenden und nichts nachbestellen.
+                    logbook.warnung(QUELLE, "Antwort ohne erkennbare Auftragsnummer: " +
+                                    config.entschaerfe(json.dumps(
+                                        antwort, ensure_ascii=False, default=str))[:800])
+                    raise errors.UnklarFehler(
+                        "Higgsfield hat geantwortet, aber keine Auftragsnummer genannt.",
+                        "Ob der Auftrag angenommen wurde, ist unklar — es wird nichts "
+                        "nachbestellt. Bitte unter higgsfield.ai bei den letzten "
+                        "Erzeugungen nachsehen. Die Antwort steht im Logbuch; bitte oben "
+                        "auf „Update“ klicken.", ursprung=QUELLE)
+                grund = config.entschaerfe(fehlertext)
                 letzter_grund = grund
                 protokoll.append(f"{modell}/{bezeichnung}: {grund[:160]}")
                 logbook.debug(QUELLE, f"{werkzeug} abgewiesen ({modell}/{bezeichnung}): "
@@ -1674,20 +1922,7 @@ class HiggsfieldAbo:
                     unbekannt = True
                     modellwechsel = True
                     break
-                if not grund.strip() or grund.strip() in ("{}", "None"):
-                    # Kein Fehlertext und keine erkennbare Nummer: Der Auftrag kann
-                    # angenommen sein, ohne dass wir ihn verfolgen können. Weitere Szenen
-                    # würden genauso ins Leere laufen — also den ganzen Lauf beenden.
-                    logbook.warnung(QUELLE, "Antwort ohne erkennbare Auftragsnummer: " +
-                                    config.entschaerfe(json.dumps(antwort,
-                                                                  ensure_ascii=False))[:800])
-                    raise errors.UnklarFehler(
-                        "Higgsfield hat geantwortet, aber keine Auftragsnummer genannt.",
-                        "Ob der Auftrag angenommen wurde, ist unklar — es wird nichts "
-                        "nachbestellt. Die Antwort steht im Logbuch; bitte oben auf "
-                        "„Update“ klicken.", ursprung=QUELLE)
                 if not _eingabefehler(antwort):
-                    nur_formfehler = False
                     raise errors.AnbieterFehler(
                         "Higgsfield hat keine Auftragsnummer zurückgegeben.",
                         grund, ursprung=QUELLE)
@@ -1751,12 +1986,18 @@ class HiggsfieldAbo:
         gestoert = 0
         while True:
             if abbruch is not None and abbruch.is_set():
+                # Wie beim Platform-Weg: beim Dienst stornieren, damit kein Guthaben für
+                # ein Ergebnis verbrannt wird, das niemand mehr sehen will.
+                self._still_abbrechen(kennung)
                 raise errors.AbbruchFehler("Auftrag abgebrochen.", ursprung=QUELLE)
             vergangen = time.monotonic() - begonnen
             if vergangen > config.JOB_TIMEOUT:
+                self._still_abbrechen(kennung)
                 raise errors.ZeitFehler(
                     f"Higgsfield ist nach {int(vergangen / 60)} Minuten nicht fertig geworden.",
-                    "Bitte mit einer kürzeren Szene erneut versuchen.", ursprung=QUELLE)
+                    "Der Auftrag wurde storniert, soweit der Dienst das zuließ. Bitte mit "
+                    "einer kürzeren Szene erneut versuchen.", ursprung=QUELLE,
+                    details={"request_id": str(kennung)})
 
             try:
                 stand = _stand_abfragen(kennung)
@@ -1825,7 +2066,7 @@ class HiggsfieldAbo:
             if melden:
                 anteil = min(0.95, vergangen / erwartet)
                 melden(anteil, max(0.0, erwartet - vergangen), zustand or "läuft")
-            time.sleep(float(roh.get("poll_after_seconds") or config.POLL_INTERVAL))
+            _schlafen(_abfragepause(roh), abbruch)
 
     def bild(self, prompt: str, *, seitenverhaeltnis: str = "16:9", aufloesung: str = "1080p",
              modell: str = "", verbessern: bool = True, saat: int | None = None,
@@ -1949,11 +2190,24 @@ class HiggsfieldAbo:
         return higgsfield.client.herunterladen(url, ziel, abbruch, melden)
 
     def abbrechen(self, request_id: str) -> bool:
+        """Storniert einen Auftrag beim Dienst. `False`, wenn es nicht geklappt hat —
+        auch dann, wenn der Dienst ganz normal antwortet, aber einen Fehler meldet."""
         try:
-            werkzeug_rufen("cancel_job", {"jobId": request_id}, zeitlimit=15)
-            return True
+            antwort = werkzeug_rufen("cancel_job", {"jobId": request_id}, zeitlimit=15)
         except Exception:
             return False
+        geschafft = not _fehlertext(antwort)
+        logbook.info(QUELLE, "Auftrag storniert." if geschafft else
+                     "Stornierung nicht möglich — der Auftrag läuft aus.",
+                     details={"request_id": request_id})
+        return geschafft
+
+    def _still_abbrechen(self, request_id: str) -> None:
+        """Stornieren, ohne dass ein Fehler dabei den eigentlichen Grund überdeckt."""
+        try:
+            self.abbrechen(str(request_id))
+        except Exception:
+            pass
 
     def selbsttest(self) -> dict:
         if not angemeldet():

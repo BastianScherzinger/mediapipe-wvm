@@ -453,3 +453,518 @@ def test_zeitmessung_bleibt_im_rahmen(abo):
     with pytest.raises(errors.KonfigurationsFehler):
         higgsfield_mcp.HiggsfieldAbo().bild("Motiv")
     assert time.monotonic() - anfang < 20
+
+
+# ── Befunde der Prüfung vom 25.09.2026 ───────────────────────────────────────
+#
+# Jeder Test unten hält einen Befund fest. Keiner spricht mit dem echten Dienst:
+# `werkzeug_rufen`, der HTTP-Client oder der Token-Endpunkt sind jeweils ersetzt.
+
+import urllib.parse as _urlparse          # noqa: E402
+import urllib.request as _urlrequest      # noqa: E402
+
+from app import config                    # noqa: E402
+
+
+@pytest.fixture
+def ohne_dienst(monkeypatch):
+    """Kein Schema, keine Modellliste, keine Wiederholungen, keine Wartezeit."""
+    jetzt = time.time()
+    monkeypatch.setattr(higgsfield_mcp, "_WERKZEUGE",
+                        {"zeit": 0.0, "liste": [], "schemata": {}, "fehlzeit": jetzt})
+    monkeypatch.setattr(higgsfield_mcp, "_MODELLE",
+                        {"zeit": 0.0, "liste": [], "fehlzeit": jetzt})
+    monkeypatch.setattr(higgsfield_mcp, "_FORM_GEMERKT", {})
+    monkeypatch.setattr(higgsfield_mcp, "_ERSATZ", {})
+    monkeypatch.setattr(higgsfield_mcp, "_BILDJOBS", {})
+    monkeypatch.setattr(config, "MAX_RETRIES", 0)
+    monkeypatch.setattr(config, "POLL_INTERVAL", 0)
+
+
+def _falscher_dienst(monkeypatch, bestellung, stand=None):
+    """Ersetzt `werkzeug_rufen`; zählt, was hinausgeht."""
+    aufrufe: list[tuple[str, dict]] = []
+
+    def rufen(name, argumente, zeitlimit=60):
+        aufrufe.append((name, argumente))
+        if name.startswith("generate_"):
+            return bestellung(argumente) if callable(bestellung) else bestellung
+        if name == "job_status":
+            return (stand or {"status": "completed",
+                              "result_url": "https://ablage.test/clip.mp4"})
+        return {}
+
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", rufen)
+    return aufrufe
+
+
+# Befund 1: Antwort ohne Nummer und ohne Fehler → unklar, nie nachbestellen
+
+@pytest.mark.parametrize("antwort", [
+    {"status": "queued"},
+    {"text": "Job started"},
+    {"results": []},
+    {},
+])
+def test_antwort_ohne_nummer_und_ohne_fehler_ist_unklar(monkeypatch, ohne_dienst, antwort):
+    from app import pipeline
+
+    aufrufe = _falscher_dienst(monkeypatch, antwort)
+    with pytest.raises(errors.UnklarFehler) as info:
+        higgsfield_mcp.HiggsfieldAbo().video_aus_text("Bewegung", dauer=5,
+                                                      modell="kling2_6")
+    assert len([n for n, _ in aufrufe if n == "generate_video"]) == 1, \
+        "womöglich angenommen — es darf keine zweite Form hinausgehen"
+    assert isinstance(info.value, pipeline._TOEDLICH)
+
+
+@pytest.mark.parametrize("feld", ["task_id", "taskId", "uuid"])
+def test_weitere_nummernfelder_werden_erkannt(monkeypatch, ohne_dienst, feld):
+    _falscher_dienst(monkeypatch, {"status": "queued", feld: "t-1"})
+    ergebnis = higgsfield_mcp.HiggsfieldAbo().video_aus_text("Bewegung", dauer=5,
+                                                             modell="kling2_6")
+    assert ergebnis.request_id == "t-1"
+
+
+# Befund 10: Die Kennung des Startbilds ist nie die Nummer des Videoauftrags
+
+BILD_UUID = "11111111-2222-3333-4444-555555555555"
+VIDEO_UUID = "99999999-8888-7777-6666-555555555555"
+
+
+def test_gesendete_kennung_wird_nicht_als_auftragsnummer_genommen():
+    nummer = higgsfield_mcp._auftragsnummer
+    text = {"text": f"Using start image {BILD_UUID}, job {VIDEO_UUID} queued"}
+    assert nummer(text) == BILD_UUID                       # ohne Ausschluss: falsch
+    assert nummer(text, {BILD_UUID}) == VIDEO_UUID
+    assert nummer({"text": f"start image {BILD_UUID}"}, {BILD_UUID}) == ""
+    assert nummer({"results": [{"id": BILD_UUID}]}, {BILD_UUID}) == ""
+
+
+def test_video_holt_nicht_das_startbild_ab(monkeypatch, ohne_dienst):
+    higgsfield_mcp._bild_merken("https://ablage.test/bild.jpg", BILD_UUID)
+    _falscher_dienst(monkeypatch, {"text": f"Accepted media {BILD_UUID}. "
+                                           f"Job {VIDEO_UUID} started."})
+    ergebnis = higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
+        "Bewegung", "https://ablage.test/bild.jpg", dauer=5, modell="kling2_6")
+    assert ergebnis.request_id == VIDEO_UUID
+
+
+def test_nur_das_startbild_im_text_ist_unklar(monkeypatch, ohne_dienst):
+    higgsfield_mcp._bild_merken("https://ablage.test/bild.jpg", BILD_UUID)
+    aufrufe = _falscher_dienst(monkeypatch, {"text": f"Accepted media {BILD_UUID}."})
+    with pytest.raises(errors.UnklarFehler):
+        higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
+            "Bewegung", "https://ablage.test/bild.jpg", dauer=5, modell="kling2_6")
+    assert len([n for n, _ in aufrufe if n == "generate_video"]) == 1
+
+
+# Befund 13: JSON-RPC „Invalid params“ ist ein Formfehler
+
+def test_rpc_formfehler_wird_zum_fehlertext():
+    for fehler in ({"code": -32602, "message": "Bad arguments"},
+                   {"code": -32000, "message": "Input validation error: params"}):
+        antwort = higgsfield_mcp._ergebnis([{"id": 5, "error": fehler}], 5)
+        assert antwort.get("error")
+        assert higgsfield_mcp._eingabefehler(antwort)
+    with pytest.raises(errors.AnbieterFehler):
+        higgsfield_mcp._ergebnis([{"id": 5, "error": {"code": -32603,
+                                                     "message": "internal"}}], 5)
+
+
+def test_rpc_formfehler_loest_die_formsuche_aus(monkeypatch, ohne_dienst):
+    higgsfield_mcp._bild_merken("https://ablage.test/bild.jpg", "bild-1")
+    versuche = []
+
+    def bestellung(argumente):
+        versuche.append(argumente)
+        if len(versuche) == 1:
+            return higgsfield_mcp._ergebnis(
+                [{"id": 5, "error": {"code": -32602, "message": "Invalid params"}}], 5)
+        return {"results": [{"id": "video-2"}]}
+
+    _falscher_dienst(monkeypatch, bestellung)
+    ergebnis = higgsfield_mcp.HiggsfieldAbo().video_aus_bild(
+        "Bewegung", "https://ablage.test/bild.jpg", dauer=5, modell="kling2_6")
+    assert ergebnis.request_id == "video-2"
+    assert len(versuche) == 2
+
+
+# Befund 8: Abbruch und Zeitlimit stornieren beim Dienst
+
+def test_abbruch_beim_warten_storniert_den_abo_auftrag(monkeypatch, ohne_dienst):
+    signal = threading.Event()
+
+    def stand_und_abbruch():
+        signal.set()                      # der Kunde klickt, während der Auftrag läuft
+        return {"status": "in_progress"}
+
+    aufrufe: list[str] = []
+
+    def rufen(name, argumente, zeitlimit=60):
+        aufrufe.append(name)
+        if name == "generate_video":
+            return {"results": [{"id": "v-8"}]}
+        if name == "job_status":
+            return stand_und_abbruch()
+        return {}
+
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen", rufen)
+    with pytest.raises(errors.AbbruchFehler):
+        higgsfield_mcp.HiggsfieldAbo().video_aus_text("Bewegung", dauer=5,
+                                                      modell="kling2_6", abbruch=signal)
+    assert "cancel_job" in aufrufe
+
+
+def test_zeitlimit_beim_warten_storniert_den_abo_auftrag(monkeypatch, ohne_dienst):
+    monkeypatch.setattr(config, "JOB_TIMEOUT", -1)
+    aufrufe = _falscher_dienst(monkeypatch, {"results": [{"id": "v-9"}]},
+                               stand={"status": "in_progress"})
+    with pytest.raises(errors.ZeitFehler):
+        higgsfield_mcp.HiggsfieldAbo().video_aus_text("Bewegung", dauer=5,
+                                                      modell="kling2_6")
+    assert ("cancel_job", {"jobId": "v-9"}) in aufrufe
+
+
+def test_fehler_beim_stornieren_verdeckt_den_abbruch_nicht(monkeypatch, ohne_dienst):
+    monkeypatch.setattr(config, "JOB_TIMEOUT", -1)
+    _falscher_dienst(monkeypatch, {"results": [{"id": "v-10"}]})
+    monkeypatch.setattr(higgsfield_mcp.HiggsfieldAbo, "abbrechen",
+                        lambda self, k: (_ for _ in ()).throw(RuntimeError("kaputt")))
+    with pytest.raises(errors.ZeitFehler):
+        higgsfield_mcp.HiggsfieldAbo().video_aus_text("Bewegung", dauer=5,
+                                                      modell="kling2_6")
+
+
+def test_stornieren_meldet_den_fehler_des_dienstes(monkeypatch):
+    kunde = higgsfield_mcp.HiggsfieldAbo()
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen",
+                        lambda *a, **k: {"error": "job already completed"})
+    assert kunde.abbrechen("x") is False
+    monkeypatch.setattr(higgsfield_mcp, "werkzeug_rufen",
+                        lambda *a, **k: {"status": "cancelled"})
+    assert kunde.abbrechen("x") is True
+
+
+# Befund 9: Die vorgeschlagene Pause des Dienstes ist begrenzt
+
+@pytest.mark.parametrize("vorschlag,erwartet", [
+    (5, 5.0), ("7", 7.0), (0, 1.0), (-3, 1.0), (3600, 30.0), (1e308 * 10, None),
+    ("bald", None), (None, None), ("", None), ([1], None),
+])
+def test_abfragepause_ist_robust_und_begrenzt(monkeypatch, vorschlag, erwartet):
+    monkeypatch.setattr(config, "POLL_INTERVAL", 4)
+    pause = higgsfield_mcp._abfragepause({"poll_after_seconds": vorschlag})
+    assert pause == (4.0 if erwartet is None else erwartet)
+
+
+def test_warten_hoert_sofort_auf_den_abbruch():
+    signal = threading.Event()
+    signal.set()
+    anfang = time.monotonic()
+    higgsfield_mcp._schlafen(30, signal)
+    assert time.monotonic() - anfang < 1
+
+
+# Befund 5 und 6: Anmeldung
+
+class _Zuhoerer(higgsfield_mcp.HTTPServer):
+    """HTTPServer, der mitschreibt, wie er beendet wird."""
+    protokoll: list[str] = []
+
+    def shutdown(self):
+        _Zuhoerer.protokoll.append("shutdown")
+        super().shutdown()
+
+    def server_close(self):
+        _Zuhoerer.protokoll.append("server_close")
+        super().server_close()
+
+
+def _ohne_proxy_abrufen(adresse: str) -> int:
+    oeffner = _urlrequest.build_opener(_urlrequest.ProxyHandler({}))
+    try:
+        with oeffner.open(adresse, timeout=5) as antwort:
+            return antwort.status
+    except _urlrequest.HTTPError as fehler:
+        return fehler.code
+
+
+def test_gescheiterte_registrierung_haengt_nicht(monkeypatch):
+    """`shutdown()` ohne laufendes `serve_forever` wartete ewig — die Anmeldung hing."""
+    _Zuhoerer.protokoll = []
+    monkeypatch.setattr(higgsfield_mcp, "HTTPServer", _Zuhoerer)
+    monkeypatch.setattr(higgsfield_mcp, "_oauth_auskunft", lambda: {
+        "authorization_endpoint": "https://anmeldung.test/authorize",
+        "token_endpoint": "https://anmeldung.test/token",
+        "registration_endpoint": "https://anmeldung.test/register"})
+
+    def scheitern(_adresse):
+        raise errors.NetzFehler("Registrierung gescheitert")
+
+    monkeypatch.setattr(higgsfield_mcp, "_registrieren", scheitern)
+    ausgang: dict = {}
+
+    def anmelden():
+        try:
+            higgsfield_mcp._anmelden(False, 5)
+        except Exception as fehler:            # noqa: BLE001
+            ausgang["fehler"] = fehler
+
+    faden = threading.Thread(target=anmelden, daemon=True)
+    faden.start()
+    faden.join(timeout=10)
+    assert not faden.is_alive(), "die Anmeldung hängt"
+    assert isinstance(ausgang.get("fehler"), errors.NetzFehler)
+    assert _Zuhoerer.protokoll == ["server_close"]
+
+
+def test_rueckruf_wertet_nur_den_rueckrufpfad_aus(monkeypatch):
+    empfaenger = higgsfield_mcp.HTTPServer(("127.0.0.1", 0),
+                                           higgsfield_mcp._RueckrufEmpfaenger)
+    monkeypatch.setattr(higgsfield_mcp._RueckrufEmpfaenger, "ergebnis", {})
+    monkeypatch.setattr(higgsfield_mcp._RueckrufEmpfaenger, "pfad", "/callback")
+    threading.Thread(target=empfaenger.serve_forever, daemon=True).start()
+    basis = f"http://127.0.0.1:{empfaenger.server_address[1]}"
+    try:
+        assert _ohne_proxy_abrufen(basis + "/favicon.ico") == 404
+        assert higgsfield_mcp._RueckrufEmpfaenger.ergebnis == {}
+        assert _ohne_proxy_abrufen(basis + "/callback?code=erster&state=s1") == 200
+        assert _ohne_proxy_abrufen(basis + "/favicon.ico") == 404
+        assert _ohne_proxy_abrufen(basis + "/callback?code=zweiter&state=s2") == 200
+        ergebnis = higgsfield_mcp._RueckrufEmpfaenger.ergebnis
+        assert ergebnis["code"] == "erster", "ein empfangener Code wird nie überschrieben"
+        assert ergebnis["state"] == "s1"
+    finally:
+        empfaenger.shutdown()
+        empfaenger.server_close()
+
+
+@pytest.mark.parametrize("zustand", [None, "falsch"])
+def test_rueckruf_ohne_passenden_zustand_wird_abgewiesen(monkeypatch, zustand):
+    monkeypatch.setattr(higgsfield_mcp, "_oauth_auskunft", lambda: {
+        "authorization_endpoint": "https://anmeldung.test/authorize",
+        "token_endpoint": "https://anmeldung.test/token",
+        "registration_endpoint": "https://anmeldung.test/register"})
+    monkeypatch.setattr(higgsfield_mcp, "_registrieren",
+                        lambda _a: {"client_id": "anwendung-1", "client_secret": ""})
+
+    class KeinNetz:
+        def __init__(self, *_a, **_k):
+            raise AssertionError("der Code darf nicht eingelöst werden")
+
+    monkeypatch.setattr(higgsfield_mcp.httpx, "Client", KeinNetz)
+    monkeypatch.setitem(higgsfield_mcp._anmeldung, "url", "")
+    ausgang: dict = {}
+
+    def anmelden():
+        try:
+            higgsfield_mcp._anmelden(False, 10)
+        except Exception as fehler:            # noqa: BLE001
+            ausgang["fehler"] = fehler
+
+    faden = threading.Thread(target=anmelden, daemon=True)
+    faden.start()
+    for _ in range(100):
+        if higgsfield_mcp._anmeldung["url"]:
+            break
+        time.sleep(0.05)
+    felder = _urlparse.parse_qs(_urlparse.urlparse(higgsfield_mcp._anmeldung["url"]).query)
+    rueckruf = felder["redirect_uri"][0].replace("localhost", "127.0.0.1")
+    anhang = "?code=abc" + (f"&state={zustand}" if zustand else "")
+    assert _ohne_proxy_abrufen(rueckruf + anhang) == 200
+    faden.join(timeout=10)
+    assert not faden.is_alive()
+    assert isinstance(ausgang.get("fehler"), errors.ZugangFehler)
+
+
+# Befund 7: Token-Erneuerung
+
+class _TokenAntwort:
+    def __init__(self, code: int, rumpf):
+        self.status_code = code
+        self._rumpf = rumpf
+        self.text = rumpf if isinstance(rumpf, str) else json.dumps(rumpf)
+
+    def json(self):
+        if isinstance(self._rumpf, str):
+            return json.loads(self._rumpf)
+        return self._rumpf
+
+
+def _token_endpunkt(monkeypatch, *antworten, verzoegerung: float = 0.0):
+    """Ersetzt `httpx.Client` im Modul; gibt die Liste der Token-Anfragen zurück."""
+    anfragen: list[dict] = []
+    liste = list(antworten)
+
+    class Klient:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def post(self, adresse, data=None, **_k):
+            anfragen.append(dict(data or {}))
+            time.sleep(verzoegerung)
+            return liste.pop(0) if len(liste) > 1 else liste[0]
+
+    monkeypatch.setattr(higgsfield_mcp.httpx, "Client", Klient)
+    return anfragen
+
+
+def _abgelaufene_anmeldung():
+    higgsfield_mcp._speichern({"client_id": "c", "access_token": "alt",
+                               "refresh_token": "erneuerung-alt",
+                               "token_endpoint": "https://anmeldung.test/token",
+                               "gueltig_bis": time.time() - 10})
+
+
+def test_gleichzeitige_erneuerung_fragt_nur_einmal(monkeypatch):
+    _abgelaufene_anmeldung()
+    anfragen = _token_endpunkt(
+        monkeypatch, _TokenAntwort(200, {"access_token": "neu", "expires_in": 3600,
+                                         "refresh_token": "erneuerung-neu"}),
+        verzoegerung=0.2)
+    ergebnisse: list[str] = []
+    faeden = [threading.Thread(target=lambda: ergebnisse.append(
+        higgsfield_mcp._gueltiges_token())) for _ in range(4)]
+    for faden in faeden:
+        faden.start()
+    for faden in faeden:
+        faden.join(timeout=10)
+    assert ergebnisse == ["neu"] * 4
+    assert len(anfragen) == 1, "rotierende Erneuerung: nur ein Faden darf erneuern"
+    assert higgsfield_mcp._laden()["refresh_token"] == "erneuerung-neu"
+
+
+@pytest.mark.parametrize("code", [429, 500, 502, 503])
+def test_gestoerter_token_endpunkt_ist_wiederholbar(monkeypatch, code):
+    _abgelaufene_anmeldung()
+    _token_endpunkt(monkeypatch, _TokenAntwort(code, "kaputt"))
+    with pytest.raises(errors.NetzFehler) as info:
+        higgsfield_mcp._gueltiges_token()
+    assert info.value.wiederholbar
+
+
+def test_abgelehnte_erneuerung_ist_ein_zugangsfehler(monkeypatch):
+    _abgelaufene_anmeldung()
+    _token_endpunkt(monkeypatch, _TokenAntwort(400, {"error": "invalid_grant"}))
+    with pytest.raises(errors.ZugangFehler):
+        higgsfield_mcp._gueltiges_token()
+
+
+def test_unlesbare_token_antwort_bricht_nicht_ab(monkeypatch):
+    _abgelaufene_anmeldung()
+    _token_endpunkt(monkeypatch, _TokenAntwort(200, "<html>kein JSON</html>"))
+    with pytest.raises(errors.NetzFehler):
+        higgsfield_mcp._gueltiges_token()
+    assert higgsfield_mcp._laden()["access_token"] == "alt", "nichts kaputtgespeichert"
+
+
+def test_unsinniges_expires_in_wird_vertragen(monkeypatch):
+    _abgelaufene_anmeldung()
+    _token_endpunkt(monkeypatch, _TokenAntwort(200, {"access_token": "neu",
+                                                     "expires_in": "bald"}))
+    assert higgsfield_mcp._gueltiges_token() == "neu"
+    assert higgsfield_mcp._laden()["gueltig_bis"] > time.time()
+
+
+def test_speichern_hinterlaesst_keine_zwischendatei():
+    for nummer in range(3):
+        higgsfield_mcp._speichern({"access_token": f"t{nummer}"})
+    ordner = higgsfield_mcp._anmeldedatei.parent
+    assert not list(ordner.glob("*.tmp"))
+    assert higgsfield_mcp._laden()["access_token"] == "t2"
+
+
+class _RpcAntwort:
+    def __init__(self, code: int, ergebnis=None, kennung=None):
+        self.status_code = code
+        self.headers = {"content-type": "application/json", "mcp-session-id": "s"}
+        self.text = json.dumps({"jsonrpc": "2.0", "id": kennung, "result": ergebnis}) \
+            if ergebnis is not None else "abgelehnt"
+
+
+def _rpc_klient(monkeypatch, codes: list[int]):
+    """Falscher HTTP-Client für `_rpc`: Eröffnung klappt, der Aufruf antwortet der
+    Reihe nach mit `codes`."""
+    aufrufe: list[tuple[str, str]] = []
+
+    class Klient:
+        is_closed = False
+
+        def post(self, _adresse, headers=None, json=None, **_k):
+            methode = (json or {}).get("method", "")
+            if methode in ("initialize", "notifications/initialized"):
+                return _RpcAntwort(200, {}, (json or {}).get("id"))
+            aufrufe.append((methode, headers["Authorization"]))
+            code = codes.pop(0) if len(codes) > 1 else codes[0]
+            ergebnis = {"structuredContent": {"results": [{"id": "v-401"}]}}
+            return _RpcAntwort(code, ergebnis if code == 200 else None, json["id"])
+
+    monkeypatch.setattr(higgsfield_mcp, "_klient", lambda: Klient())
+    monkeypatch.setattr(higgsfield_mcp, "_gueltiges_token", lambda: "alt")
+    monkeypatch.setattr(higgsfield_mcp, "_token_erneuern", lambda abgelehnt: "neu")
+    return aufrufe
+
+
+@pytest.mark.parametrize("werkzeug", ["job_status", "generate_video"])
+def test_401_erneuert_einmal_und_wiederholt(monkeypatch, werkzeug):
+    """401 heißt: vor jeder Verarbeitung abgewiesen — auch eine Bestellung ist dann
+    nicht angenommen und darf einmal wiederholt werden."""
+    aufrufe = _rpc_klient(monkeypatch, [401, 200])
+    antwort = higgsfield_mcp.werkzeug_rufen(werkzeug, {"params": {}})
+    assert antwort["results"][0]["id"] == "v-401"
+    assert [kopf for _m, kopf in aufrufe] == ["Bearer alt", "Bearer neu"]
+
+
+def test_zweites_401_ist_ein_zugangsfehler(monkeypatch):
+    aufrufe = _rpc_klient(monkeypatch, [401])
+    with pytest.raises(errors.ZugangFehler):
+        higgsfield_mcp.werkzeug_rufen("generate_video", {"params": {}})
+    assert len(aufrufe) == 2, "genau eine Wiederholung"
+
+
+def test_bestellung_mit_5xx_wird_nicht_wiederholt(monkeypatch):
+    aufrufe = _rpc_klient(monkeypatch, [502, 200])
+    with pytest.raises(errors.UnklarFehler):
+        higgsfield_mcp.werkzeug_rufen("generate_video", {"params": {}})
+    assert len(aufrufe) == 1
+
+
+# Befund 15: 403 im Abo nennt nicht den API-Schlüssel
+
+def test_403_im_abo_hat_einen_eigenen_hinweis(monkeypatch):
+    _rpc_klient(monkeypatch, [403])
+    with pytest.raises(errors.ZugangFehler) as info:
+        higgsfield_mcp.werkzeug_rufen("job_status", {})
+    assert "HIGGSFIELD_API_KEY" not in info.value.hinweis
+    assert "Anmeldung" in info.value.hinweis
+
+
+# Befund 16: Die Marken der Abo-Anmeldung werden geschwärzt
+
+def test_marken_der_anmeldung_werden_geschwaerzt(monkeypatch):
+    monkeypatch.setattr(config, "_WEITERE_GEHEIMNISSE", {})
+    marken = {"access_token": "zugriff-" + "a" * 30, "refresh_token": "erneuer-" + "b" * 30,
+              "client_secret": "geheim-" + "c" * 30}
+    higgsfield_mcp._speichern(marken)
+    text = config.entschaerfe("Fehler: " + " ".join(marken.values()))
+    for wert in marken.values():
+        assert wert not in text
+
+    # Auch was nur von der Platte gelesen wird (Programmstart), zählt.
+    monkeypatch.setattr(config, "_WEITERE_GEHEIMNISSE", {})
+    higgsfield_mcp._laden()
+    assert marken["refresh_token"] not in config.entschaerfe(marken["refresh_token"])
+
+
+def test_kurze_werte_werden_nicht_gemerkt(monkeypatch):
+    monkeypatch.setattr(config, "_WEITERE_GEHEIMNISSE", {})
+    config.geheimnis_merken("kurz")
+    config.geheimnis_merken("")
+    assert config.entschaerfe("kurz") == "kurz"

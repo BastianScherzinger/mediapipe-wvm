@@ -158,10 +158,14 @@ def test_verbindung_nicht_aufgebaut_wird_wiederholt(klient, monkeypatch):
     assert kennung == "ok-2"
 
 
-def test_fehlende_kennung_ist_ein_anbieterfehler(klient, monkeypatch):
-    monkeypatch.setattr(klient, "_anfrage", Antworten((200, {"status": "queued"}, "{}")))
-    with pytest.raises(errors.AnbieterFehler):
+def test_fehlende_kennung_ist_unklar_und_wird_nie_wiederholt(klient, monkeypatch):
+    """Angenommen ohne Nummer heißt: vielleicht bezahlt. Ein Szenenfehler ließe die
+    nächste Szene neu kaufen; UnklarFehler beendet den Lauf und wird nie wiederholt."""
+    antworten = Antworten((200, {"status": "queued"}, "{}"))
+    monkeypatch.setattr(klient, "_anfrage", antworten)
+    with pytest.raises(errors.UnklarFehler):
         klient.auftrag_erstellen("modell/x", {"prompt": "hallo"})
+    assert len(antworten.aufrufe) == 1
 
 
 def test_ohne_schluessel_klare_ansage(monkeypatch):
@@ -328,3 +332,96 @@ def test_beide_anmeldeverfahren_werden_mitgeschickt(klient):
     assert kopf["Authorization"] == "Key TESTID:TESTGEHEIMNIS"
     assert kopf["hf-api-key"] == "TESTID"
     assert kopf["hf-secret"] == "TESTGEHEIMNIS"
+
+
+# ── Befunde der Prüfung vom 25.09.2026 ───────────────────────────────────────
+
+@pytest.mark.parametrize("zustand", ["canceled", "cancelled"])
+def test_storno_durch_den_dienst_ist_kein_benutzerabbruch(klient, monkeypatch, zustand):
+    """Hat der Dienst storniert, darf die Ablaufsteuerung genau einmal neu bestellen —
+    dafür braucht sie einen Anbieterfehler mit `endzustand`, keinen Abbruch."""
+    monkeypatch.setattr(klient, "_anfrage", Antworten((200, {"status": zustand}, "")))
+    with pytest.raises(errors.AnbieterFehler) as info:
+        klient.warten("id-7", "https://api/status", modell="m", art="video")
+    assert not isinstance(info.value, errors.AbbruchFehler)
+    assert info.value.details == {"request_id": "id-7", "endzustand": zustand}
+
+
+def test_storno_nach_benutzerabbruch_bleibt_ein_abbruch(klient, monkeypatch):
+    signal = threading.Event()
+
+    def anfrage(methode, pfad, rumpf=None, *, zeitlimit=0):
+        signal.set()                   # der Kunde klickt, während die Abfrage läuft
+        return (200, {"status": "canceled"}, "")
+
+    monkeypatch.setattr(klient, "_anfrage", anfrage)
+    with pytest.raises(errors.AbbruchFehler):
+        klient.warten("id-8", "https://api/status", modell="m", art="video",
+                      abbruch=signal)
+
+
+def test_unbekannte_nummer_beim_fortsetzen_fuehrt_zur_neubestellung(klient, monkeypatch):
+    """Früher galt jedes 404 als „wartet“ — mit einer Nummer, die der Dienst nicht
+    kennt, saß der Kunde eine Viertelstunde vor nichts, und neu bestellt wurde nie."""
+    antworten = Antworten((404, {}, "nicht da"))
+    monkeypatch.setattr(klient, "_anfrage", antworten)
+    with pytest.raises(errors.AnbieterFehler) as info:
+        klient.video_aus_bild("p", "https://x/b.jpg", modell="m", fortsetzen="alt-1")
+    assert info.value.details["endzustand"] == "unbekannt"
+    assert len(antworten.aufrufe) == 3
+    assert not any(m == "POST" for m, _p, _r in antworten.aufrufe), "nichts bestellt"
+
+
+def test_frischer_auftrag_gilt_erst_nach_einer_minute_als_unbekannt(klient, monkeypatch):
+    uhr = {"jetzt": 0.0}
+
+    def monotonic():
+        uhr["jetzt"] += 7.0
+        return uhr["jetzt"]
+
+    monkeypatch.setattr("time.monotonic", monotonic)
+    antworten = Antworten((404, {}, "nicht da"))
+    monkeypatch.setattr(klient, "_anfrage", antworten)
+    with pytest.raises(errors.AnbieterFehler) as info:
+        klient.warten("neu-1", "https://api/status", modell="m", art="video")
+    assert info.value.details["endzustand"] == "unbekannt"
+    assert len(antworten.aufrufe) > 3, "ein frischer Auftrag bekommt mehr Geduld"
+
+
+def test_einzelnes_404_unterbricht_die_serie_nicht_falsch(klient, monkeypatch):
+    """Zwei 404, dann ein Stand: Die Serie beginnt von vorn, der Auftrag wird fertig."""
+    monkeypatch.setattr(klient, "_anfrage", Antworten(
+        (404, {}, ""), (404, {}, ""), (200, {"status": "in_progress"}, ""),
+        (404, {}, ""), (404, {}, ""),
+        (200, {"status": "completed", "result_url": "https://x.de/v.mp4"}, "")))
+    ergebnis = klient.warten("id-9", "https://api/status", modell="m", art="video",
+                             fortgesetzt=True)
+    assert ergebnis.url.endswith(".mp4")
+
+
+@pytest.mark.parametrize("code", [401, 403])
+def test_abgelehnter_download_nennt_nicht_den_api_schluessel(klient, monkeypatch,
+                                                              tmp_path, code):
+    import httpx
+
+    echter_klient = httpx.Client
+    transport = httpx.MockTransport(lambda anfrage: httpx.Response(code, text="Forbidden"))
+    monkeypatch.setattr(higgsfield.httpx, "Client",
+                        lambda **benannt: echter_klient(transport=transport, **benannt))
+    with pytest.raises(errors.AnbieterFehler) as info:
+        klient.herunterladen("https://ablage.test/v.mp4", tmp_path / "v.mp4")
+    assert "Download abgelehnt" in info.value.meldung
+    assert "HIGGSFIELD_API_KEY" not in info.value.hinweis
+    assert not (tmp_path / "v.mp4.teil").exists()
+
+
+def test_tests_schreiben_nie_ins_echte_datenverzeichnis():
+    """Die gemeinsame Vorkehrung aus conftest.py greift für jeden Test."""
+    echt = config.BASE_DIR / "data"
+    assert echt not in higgsfield._laufzeiten._pfad.parents
+    assert echt not in higgsfield._guthaben._pfad.parents
+    from app import higgsfield_mcp
+    assert echt not in higgsfield_mcp._anmeldedatei.parents
+    assert echt not in higgsfield_mcp._werkzeugdatei.parents
+    assert higgsfield.client.api_key == ""
+    assert not higgsfield.client.verfuegbar
