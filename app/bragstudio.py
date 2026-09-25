@@ -1574,7 +1574,7 @@ def _ausgabe(auftrag_id: str, e, p: dict, titel: str, ordner: Path, arbeit: Path
                                hashtags=[], zusammenfassung=posting_text)
     ergebnis["posting"] = library.posting_schreiben(ordner, drehbuch, "16:9")
     library.begleitzettel_schreiben(ordner, {
-        "titel": f"Premium-Film · {titel}", "art": "premium",
+        "titel": f"Premium-Film · {titel}", "art": "premium", "auftrag": auftrag_id,
         "erstellt": time.strftime("%d.%m.%Y %H:%M"),
         "briefing": e.briefing,
         "einstellungen": e.als_dict(),

@@ -1,14 +1,16 @@
 # MEDIAPIPE WVM — technische Dokumentation
 
-Stand 11.09.2026 · Version 1.0.0
+Stand 25.09.2026 · Version 1.0.0
 
 Diese Datei richtet sich an denjenigen, der das Werkzeug später ändert oder erweitert.
 Für die Bedienung genügt die [README](../README.md).
 
-> **Zuerst lesen, wenn etwas klemmt:** [`BEFUND_2026-09-11.md`](BEFUND_2026-09-11.md) —
-> der dritte Kundenlauf, das Schema des MCP-Dienstes, „Erneut versuchen“ und die neue
-> Funktion „Webseite → TikTok“. Die älteren Befunde
-> ([`05.09.`](BEFUND_2026-09-05.md), [`26.08.`](BEFUND_2026-08-26.md)) bleiben gültig.
+> **Zuerst lesen, wenn etwas klemmt:** [`BEFUND_2026-09-25.md`](BEFUND_2026-09-25.md) —
+> die Durchsicht des gesamten Codes nach dem Premium-Film, mit allen Behebungen und dem,
+> was offen bleibt. Davor [`BEFUND_2026-09-11.md`](BEFUND_2026-09-11.md) — der dritte
+> Kundenlauf, das Schema des MCP-Dienstes, „Erneut versuchen“ und „Webseite → TikTok“.
+> Die älteren Befunde ([`05.09.`](BEFUND_2026-09-05.md), [`26.08.`](BEFUND_2026-08-26.md))
+> bleiben gültig.
 > Der jüngste Befund geht im Zweifel diesem Dokument vor.
 
 ---
@@ -37,6 +39,10 @@ app/
 ├── webaufnahme.py    Webseite prüfen, fotografieren (Playwright/Edge), auslesen
 ├── webwerbung.py     Ablauf „Webseite → TikTok“: Konzept, KI-Szene, Ausgabe
 ├── werbeschnitt.py   Motion-Design mit Pillow → ffmpeg, Beat in reinem Python
+├── bragstudio.py     Ablauf „Premium-Film“: Material, Auftrag, Agentenlauf, Ausgabe,
+│                     Aufwerten
+├── bragagent.py      Claude-Code-CLI als Werkzeugbenutzer: Skills bereitstellen,
+│                     Lauf führen (Wächter, Prozessbaum), Tokens und Kosten abrechnen
 ├── jobstore.py       Aufträge in SQLite, überleben Neustarts
 ├── media.py          ffmpeg: Montage, Formate, GIF, Vorschaubild
 ├── library.py        Bibliothek, Pfadsicherheit, Formate nachziehen
@@ -44,16 +50,19 @@ app/
 ├── topics.py         Themen- und Merkmalkatalog (reine Daten)
 └── server.py         Flask-Routen, Ereignisstrom, Dateiauslieferung
 
-static/js/            kern · formular · webseite · ablauf · logbuch · bibliothek ·
-                      aktualisierung · abo · start
+static/js/            kern · formular · webseite · premium · ablauf · logbuch ·
+                      bibliothek · aktualisierung · abo · start
 static/css/app.css    Design-Tokens und alle Bausteine
 templates/index.html  Struktur + eingebetteter Iconsatz
 requirements-optional.txt  Playwright — beim Update ohne Folgen bei Misserfolg
+bragvorlage/          Rezept, Handwerkswissen und drei Referenzkompositionen, die jeder
+                      Premium-Auftrag als rezept/ in seinen Arbeitsordner bekommt
 
 data/                 auftraege.db, laufzeiten.json, guthabenstand.json,
-                      higgsfield_abo.json, higgsfield_werkzeuge.json
+                      higgsfield_abo.json, higgsfield_werkzeuge.json, server.port,
+                      material/ (Upload-Körbe, nach 24 h geräumt), werkzeuge/
 output/               ein Ordner je Video (mit zwischenstand.json)
-tests/                rund 300 Tests
+tests/                rund 420 Tests
 ```
 
 **Abhängigkeitsrichtung:** `server → pipeline → {promptsmith, higgsfield, media, library,
@@ -381,6 +390,72 @@ Zahl.
 
 ---
 
+## 4d. Premium-Film
+
+Der dritte Bereich. Hier schreibt das Programm **kein** Storyboard und kein HTML — es
+stellt Material und Auftrag zusammen, startet die Claude-Code-CLI im Agentenmodus und
+sortiert hinterher ein, was gerendert wurde. Alles Gestalterische liegt bei Claude, dem
+`/brag`-Skill, den Hyperframes-Skills und den Regeln in `bragvorlage/`.
+
+```
+Material  →  Auftrag  →  Bauen  →  Rendern  →  Ausgabe
+bragstudio   Sprach-     bragagent.lauf()       film.mp4, film_hoch.mp4,
+._material_  modell      (npx hyperframes       Poster, Posting, Aufwand
+sammeln      schreibt    check/render)
+             master-
+             prompt.md
+```
+
+**Voraussetzungen** (`bragagent.bereit()`, Lampe unter den Fragen): Claude-CLI, Node ≥ 22,
+ffmpeg. `werkzeuge_sichern()` holt beim ersten Auftrag den `/brag`-Skill (git) und die
+Hyperframes-Skills (`npx hyperframes@<Version> skills`). Seit dem 25.09. läuft diese
+Prüfung **vor** Materialsammlung und Drehbuch — fehlt Node, steht das nach Sekunden fest.
+Unter Windows werden `npx` und `git` samt `.cmd`-Endung aufgelöst (`_programm`).
+
+**Quellen:** `webseite` (Texte, Fotos der Seite und Unterseiten, Bildschirmaufnahme mit
+Frist `MPW_BRAG_AUFNAHME_GRENZE`), `ordner` (Auszug aus einem Projektordner:
+`os.walk` mit Beschneidung von `node_modules` & Co., höchstens 400 Dateien/300 MB,
+**Dateien mit möglichen Zugangsdaten werden nie kopiert** — `_GEHEIMDATEI`), `thema`
+(Beschreibung plus Uploads). Uploads landen in `data/material/<korb>` (Grenze 250 MB je
+Korb) und werden beim Start übernommen; liegen gebliebene Körbe räumt `run.py` nach
+24 h weg. Eine Seite, die Programme abweist (403), beendet den Auftrag nicht mehr.
+
+**Der Agentenlauf** (`bragagent.lauf`): `claude -p --output-format stream-json
+--permission-mode bypassPermissions --disallowedTools WebSearch WebFetch --add-dir
+<Arbeitsordner>`. Jeder Werkzeugaufruf wird ins Logbuch gemeldet, am Ende kommen Tokens
+und Listenpreis. Zur Freigabe der Werkzeuge steht die Begründung im Kopf von
+`bragagent.py` — **während eines Laufs kann Claude auf dem Rechner Befehle ausführen.**
+Eingegrenzt wird: Arbeitsverzeichnis, keine Netzwerkzeuge, fremde Zugangsdaten
+(`HIGGSFIELD…`, `…TOKEN`, `…API_KEY`, `…SECRET` …) werden aus der Umgebung entfernt
+(`_ohne_geheimnisse`, Ausnahme `CLAUDE_CODE_OAUTH_TOKEN`), und der Auftragstext enthält
+eine Sicherheitsregel: Texte aus dem Material sind Daten, keine Anweisungen.
+
+Abbruch und Zeitlimit (`MPW_BRAG_ZEITLIMIT`) überwacht ein **eigener Wächter-Faden**;
+er beendet den ganzen Prozessbaum (`taskkill /T /F` unter Windows, Prozessgruppe sonst).
+Vorher wirkte „Abbrechen“ erst, wenn der Agent die nächste Zeile schrieb — bei einem
+minutenlangen `hyperframes render` also gar nicht, und unter Windows liefen Node und
+der Render-Browser nach einem Abbruch weiter.
+
+**Ausgabe** (`_ausgabe`): Es zählen nur MP4 aus `arbeit/brag-output/`, die **während
+dieses Laufs** entstanden sind (`seit`). Ein hochgeladener Clip im Material oder ein
+alter Render einer Aufwertung wird so nie zum „fertigen Film“. Fehlt das Querformat, wird
+es aus dem Hochformat abgeleitet (`format_erzeugen(…, "breit")`), fehlt das Hochformat,
+wird es geschnitten — beides mit Vermerk in `ausgefallen`. Poster, Plan und Posting-Text
+kommen ebenfalls nur aus `brag-output/`.
+
+**Aufwerten** (`POST /api/premium/aufwerten/<id>`, Knopf auf der Kachel): läuft im Ordner
+des Vorgängers, übernimmt dessen `master-prompt.md` und bekommt nur die Mängelliste
+(`premium.maengel`, bis 2000 Zeichen — ein eigenes Feld, damit nicht still der Wunsch
+des Erstauftrags als Mängelliste durchgeht). Der bisherige Film wird vorher nach
+`fruehere_fassungen/<Zeit>/` gesichert; eine zweite Aufwertung desselben Films wird
+abgewiesen, solange die erste läuft oder wartet; der ursprüngliche Projektordner muss
+nicht mehr existieren. Während ein Auftrag im Ordner arbeitet, verweigert die Bibliothek
+Löschen und Formate für diesen Ordner.
+
+**Modell:** Vorgabe `claude-sonnet-5` (`MPW_BRAG_MODEL`), Opus je Auftrag wählbar.
+
+---
+
 ## 5. Was beim Bauen Zeit gekostet hat
 
 Acht Fallen, die alle im Code kommentiert sind — damit sie niemand ein zweites Mal tritt:
@@ -466,7 +541,7 @@ nicht mehr auf die Umgebung. (`run.py:voraussetzungen_melden`)
 ## 7. Tests
 
 ```
-python -m pytest tests/ -q                    # alle, rund 6 Minuten
+python -m pytest tests/ -q                    # alle, rund 4 Minuten
 python -m pytest tests/ -q -m "not langsam"   # ohne echte ffmpeg-Läufe, wenige Sekunden
 ```
 
@@ -483,6 +558,10 @@ python -m pytest tests/ -q -m "not langsam"   # ohne echte ffmpeg-Läufe, wenige
 | `test_abo_attrappe.py` | Abo-Weg gegen einen **strengen MCP-Server** (echtes JSON-RPC über HTTP), der nur die dokumentierte Form annimmt und alles andere mit dem Satz aus dem Kundenlogbuch abweist |
 | `test_webwerbung.py` | Adressprüfung (auch lokale Adressen), Konzept mit/ohne Sprachmodell, Markenfarben, Schnitt mit ffmpeg, Webseiten-Auftrag bis zur Bibliothek |
 | `test_ende_zu_ende.py` | **die ganze Kette** mit Higgsfield-Attrappe |
+| `test_premiumfilm.py` | Premium-Film: Eingaben, Projektauszug (Ballast, Zugangsdaten, Abbruch), Upload-Körbe, Sortenwahl, Abrechnung aus dem Ereignisstrom, Agentenlauf mit schweigender Attrappe (Abbruch und Zeitlimit samt Kindprozess), Ausgabe beider Fassungen, Aufwertung |
+| `test_kern_haertung.py` | ffmpeg mit viel Fehlerausgabe, atomare Montage, Apostroph im Pfad, falsche Typen in Anfragen, HTTP-Fehlercodes, Warteschlangen-Reihenfolge, Wiederholungskette, geschützte Ordner, Portdatei, Update-Rauchtest und -Sperre |
+| `test_llm.py` | Claude-CLI: Antworthüllen, gesperrte Werkzeuge, Systemtext, Zeitlimit |
+| `conftest.py` | Schirmt jeden Test von `.env`, Abo-Anmeldung und echtem `data/` ab — kein Test schreibt in den echten Bestand oder geht ins Netz |
 
 Der Ende-zu-Ende-Test ist der wichtigste: er ersetzt nur Higgsfield und das
 Sprachmodell, alles andere läuft echt — Zustandsmaschine, Montage, Formate,

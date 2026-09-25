@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import config, errors, pipeline, updater  # noqa: E402
+from app import errors, pipeline, updater  # noqa: E402
 
 
 class GitAttrappe:

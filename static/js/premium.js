@@ -290,9 +290,18 @@
     }
     zeile(`${dateien.length} Datei(en) werden übertragen …`);
     try {
-      const antwort = await fetch("/api/premium/material", { method: "POST", body: daten })
-        .then((a) => a.json());
-      if (!antwort.ok) throw new Error(antwort.meldung || "Übertragung fehlgeschlagen.");
+      // Über MPW.hole statt fetch: Dort werden Netzfehler, Fehlercodes und Antworten
+      // ohne JSON (etwa eine HTML-Fehlerseite) zu einer verständlichen Meldung.
+      let antwort;
+      try {
+        antwort = await MPW.hole("/api/premium/material", { method: "POST", body: daten });
+      } catch (fehler) {
+        if (/\(413\)/.test(fehler.message)) {
+          throw new Error("Das Material ist zu groß für eine Übertragung. " +
+                          "Bitte weniger Dateien auf einmal auswählen.");
+        }
+        throw new Error("Übertragung fehlgeschlagen: " + (fehler.message || "unbekannter Fehler"));
+      }
       zustand.material = zustand.material.concat(antwort.angenommen || []);
       materialZeigen();
       const weg = (antwort.abgewiesen || []).length;

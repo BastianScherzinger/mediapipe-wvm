@@ -12,10 +12,12 @@
 
   let videos = [];
   const laufendeFormate = new Set();      // "ordner|format", damit Doppelklicks ins Leere gehen
+  let premiumKatalog = null;              // Modelle für „Aufwerten“ (aus /api/start)
 
   MPW.bibliothek = { aufbauen, laden };
 
-  function aufbauen() {
+  function aufbauen(start) {
+    premiumKatalog = start?.premium || null;
     $("#btn-biblio-neu").addEventListener("click", () => laden(true));
     $("#btn-schau-zu").addEventListener("click", schliessen);
     $("#schau").addEventListener("close", () => {
@@ -103,6 +105,11 @@
         el("div", { klasse: "karte-formate" }, formatMarken(video)),
       ]),
       el("div", { klasse: "karte-fuss" }, [
+        // Nur Premium-Filme lassen sich aufwerten — und nur, wenn die Kachel den Auftrag
+        // kennt, aus dem sie stammt (ältere Begleitzettel haben ihn nicht).
+        video.art === "premium" && auftragVon(video)
+          ? werkzeug("stern", "Aufwerten — Mängel beheben lassen", () => aufwerten(video))
+          : null,
         werkzeug("download", "Herunterladen", () => herunterladen(video)),
         werkzeug("ordner", "Im Explorer zeigen", () => explorer(video)),
         werkzeug("stift", "Umbenennen", () => umbenennen(video)),
@@ -166,6 +173,105 @@
     }
 
     return marken;
+  }
+
+  /* ── Aufwerten ─────────────────────────────────────────────────────────
+   *
+   * Ein fertiger Premium-Film wird nachgebessert statt neu gebaut: Claude bekommt die
+   * Mängelliste und arbeitet im Ordner des Vorgängers weiter. Das kostet einen
+   * Bruchteil eines Neubaus. Das Ergebnis läuft wie jeder andere Auftrag durch Ablauf
+   * und Warteschlange.
+   */
+  function auftragVon(video) {
+    return String(video.auftrag || video.auftrag_id || "").replace(/[^a-f0-9]/gi, "");
+  }
+
+  function aufwerten(video) {
+    const kennung = auftragVon(video);
+    if (!kennung) return;
+    $("#aufwerten-fenster")?.remove();
+
+    const modelle = premiumKatalog?.modelle || [];
+    const maengel = el("textarea", {
+      id: "aufwerten-maengel", klasse: "eingabe eingabe-flaeche", rows: "5",
+      maxlength: "2000", required: true,
+      placeholder: "z. B. Das Logo am Ende ist zu klein, der Preis steht zu kurz im Bild, " +
+                   "die zweite Szene wirkt unruhig.",
+    });
+    const modellwahl = modelle.length
+      ? el("select", { id: "aufwerten-modell", klasse: "eingabe" }, [
+          el("option", { value: "", text: "Wie beim ersten Bau" }),
+          ...modelle.map((m) => el("option", { value: m.id, text: m.name })),
+        ])
+      : null;
+    const zeile = el("p", { klasse: "startzeile", role: "status" });
+    const melde = (text, art) => {
+      zeile.textContent = text;
+      if (art) zeile.dataset.art = art; else delete zeile.dataset.art;
+    };
+    const startknopf = el("button", { klasse: "knopf knopf-haupt", type: "submit" },
+                          [icon("stern"), " Aufwerten starten"]);
+
+    const fenster = el("dialog", {
+      klasse: "schau abo-fenster", id: "aufwerten-fenster",
+      "aria-labelledby": "aufwerten-titel",
+    }, [
+      el("form", {
+        method: "dialog",
+        onsubmit: async (ereignis) => {
+          ereignis.preventDefault();
+          const text = maengel.value.trim();
+          if (text.length < 5) {
+            melde("Bitte kurz beschreiben, was besser werden soll.", "fehler");
+            maengel.focus();
+            return;
+          }
+          startknopf.disabled = true;
+          melde("Aufwertung wird angenommen …");
+          const koerper = { maengel: text };
+          if (modellwahl && modellwahl.value) koerper.modell = modellwahl.value;
+          try {
+            const antwort = await MPW.hole(`/api/premium/aufwerten/${kennung}`, { koerper });
+            fenster.close();
+            if (antwort.gestartet) MPW.ablauf.zuruecksetzen();
+            // Dieselbe Behandlung wie ein normaler Start: Ablauf, Warteschlange, Zeile.
+            MPW.start.angenommen(antwort, (t, a) => MPW.premium.zeile(t, a));
+            MPW.melden(antwort.gestartet ? "Aufwertung läuft." : "Aufwertung eingereiht.",
+                       "erfolg", 4000);
+          } catch (fehler) {
+            melde(fehler.meldung || fehler.message, "fehler");
+            startknopf.disabled = false;
+          }
+        },
+      }, [
+        el("div", { klasse: "schau-kopf" }, [
+          el("h3", { id: "aufwerten-titel", text: "Premium-Film aufwerten" }),
+          el("button", {
+            klasse: "knopf knopf-mini", type: "button", title: "Schließen",
+            "aria-label": "Schließen", onclick: () => fenster.close(),
+          }, [icon("schliessen")]),
+        ]),
+        el("div", { klasse: "abo-inhalt" }, [
+          el("p", { klasse: "hinweis", text: `„${video.titel}“ — Claude bessert den ` +
+                    "vorhandenen Film nach, statt neu zu bauen. Das kostet deutlich " +
+                    "weniger Kontingent als ein Neubau." }),
+          el("label", { for: "aufwerten-maengel", text: "Was soll besser werden?" }),
+          maengel,
+          modellwahl ? el("label", { for: "aufwerten-modell", text: "Modell" }) : null,
+          modellwahl,
+          zeile,
+          el("div", { klasse: "abo-knoepfe" }, [
+            el("button", { klasse: "knopf", type: "button", text: "Abbrechen",
+                           onclick: () => fenster.close() }),
+            startknopf,
+          ]),
+        ]),
+      ]),
+    ]);
+    fenster.addEventListener("close", () => fenster.remove());
+    document.body.append(fenster);
+    fenster.showModal();
+    maengel.focus();
   }
 
   /* ── Aktionen ──────────────────────────────────────────────────────────── */

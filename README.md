@@ -284,7 +284,8 @@ Handlungsaufforderung, Kontaktzeile und ein freier Wunsch an Claude.
 
 **Material** können Sie immer dazulegen: einzelne Bilder („Bilder wählen“) oder einen
 ganzen Ordner („Ordner hochladen“). Logo, Produktfotos, Hausschrift — alles, was im
-Video vorkommen soll.
+Video vorkommen soll. Aus einem Projektordner übernimmt das Programm nie Dateien, die
+Zugangsdaten enthalten könnten (`.env`, Schlüssel, `settings.py` und Ähnliches).
 
 ### Was nach dem Klick passiert
 
@@ -296,7 +297,17 @@ Video vorkommen soll.
 5. **Ausgabe** — Film, Hochformat, Vorschaubild und Posting-Text landen in der Übersicht.
 
 Ein Film dauert **8 bis 25 Minuten**. Das Fenster kann offen bleiben; unten links
-läuft mit, woran Claude gerade arbeitet.
+läuft mit, woran Claude gerade arbeitet. **Abbrechen** wirkt sofort, auch mitten im
+Rendern.
+
+### Nachbessern statt neu bauen: „Aufwerten“
+
+Stimmt an einem fertigen Premium-Film etwas nicht — Logo zu klein, ein Übergang zu hart,
+ein Text zu lang —, gibt es auf seiner Kachel den Knopf **Aufwerten**. Dort die Mängel
+aufschreiben, auf Wunsch ein anderes Modell wählen, fertig. Claude arbeitet dann nur die
+Liste ab und rendert neu; Material, Auftrag und Komposition bleiben. Das kostet einen
+Bruchteil eines Neubaus. Die bisherige Fassung wird vorher im Videoordner unter
+`fruehere_fassungen/` aufgehoben.
 
 ### Was das kostet
 
@@ -305,8 +316,9 @@ Listenpreis in Dollar. Wer über sein Claude-Abo arbeitet, zahlt diesen Betrag n
 zusätzlich; die Zahl sagt, wie viel Kontingent ein Film kostet. Sie ist die Grundlage
 dafür, ein solches Video seriös zu bepreisen.
 
-Das Modell lässt sich je Auftrag wählen: **Opus** liefert die beste Gestaltung,
-**Sonnet** ist deutlich günstiger und oft gut genug.
+Das Modell lässt sich je Auftrag wählen. Vorgabe ist **Sonnet** — etwa ein Fünftel des
+Kontingents und mit den Regeln des Programms für die meisten Filme gut genug. **Opus**
+liefert die beste Gestaltung und kostet entsprechend mehr.
 
 ### Voraussetzungen
 
@@ -377,6 +389,9 @@ Ein Klick auf ein Lämpchen prüft ebenfalls alles durch.
 | „Higgsfield nimmt den Auftrag in keiner bekannten Form an.“ | Es wurde **nichts abgerechnet** — das Programm prüft das, bevor ein Startbild bezahlt wird. Oben auf **Update** drücken; bleibt es dabei, im Logbuch auf das Kopiersymbol klicken und den Text weitergeben. |
 | „Die Webseite ließ sich nicht fotografieren.“ | Dafür wird Microsoft Edge oder Google Chrome gebraucht. Auf Windows 11 ist Edge immer da; einmal **Update** drücken, dann werden die Hilfspakete nachgezogen. |
 | „Diese Adresse zeigt nicht ins öffentliche Internet.“ | Es lassen sich nur öffentlich erreichbare Webseiten verwenden, keine Adressen im eigenen Netz. |
+| „Die neue Fassung ließ sich nicht starten — es bleibt beim bisherigen Stand.“ | Das Update hat nichts kaputt gemacht: Das Programm läuft mit dem alten Stand weiter. Meist fehlt ein Paket — im Projektordner `python -m pip install -r requirements.txt` ausführen und erneut auf **Update** drücken. |
+| „Higgsfield hat den Auftrag angenommen, aber keine Auftragsnummer zurückgegeben.“ | Ob er abgerechnet wurde, ist unklar. Der Lauf hält deshalb an, statt womöglich doppelt zu bestellen. Unter cloud.higgsfield.ai bzw. higgsfield.ai nachsehen, dann „Erneut versuchen“. |
+| „An diesem Video wird gerade gearbeitet.“ | Ein Auftrag (etwa eine Aufwertung) arbeitet im Ordner dieses Videos. Löschen und neue Fassungen gehen, sobald er fertig ist. |
 | „Das Higgsfield-Abo hat keine Credits mehr.“ | Das Abo selbst ist aufgebraucht. Unter higgsfield.ai nachsehen. Solange erzeugt der Probelauf Platzhalterclips. |
 | „Kein Sprachmodell lieferte ein brauchbares Drehbuch“ | Das Programm hat sich selbst beholfen und läuft weiter — die Videos werden aber sichtbar schwächer. Abhilfe: einmal `claude login` im Terminal ausführen. Das nutzt Ihr Claude-Abo und kostet nichts extra. |
 
@@ -408,14 +423,15 @@ Aufbau, Module, API-Befunde und Wartungshinweise stehen in
 [`docs/DOKUMENTATION.md`](docs/DOKUMENTATION.md), der geprüfte Stand der Higgsfield-API in
 [`docs/API_BEFUND.md`](docs/API_BEFUND.md). Was bei den Läufen auf dem Kundenrechner
 schiefging und was daraufhin geändert wurde, steht in
-[`docs/BEFUND_2026-09-11.md`](docs/BEFUND_2026-09-11.md) (jüngster),
+[`docs/BEFUND_2026-09-25.md`](docs/BEFUND_2026-09-25.md) (jüngster — Durchsicht des
+gesamten Codes), [`docs/BEFUND_2026-09-11.md`](docs/BEFUND_2026-09-11.md),
 [`docs/BEFUND_2026-09-05.md`](docs/BEFUND_2026-09-05.md) und
 [`docs/BEFUND_2026-08-26.md`](docs/BEFUND_2026-08-26.md).
 
 Tests:
 
 ```
-python -m pytest tests/ -q                    # alle (rund 6 Minuten)
+python -m pytest tests/ -q                    # alle (rund 4 Minuten)
 python -m pytest tests/ -q -m "not langsam"   # nur die schnellen (wenige Sekunden)
 ```
 

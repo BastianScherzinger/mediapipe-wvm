@@ -241,3 +241,235 @@ def test_webseiten_auftrag_von_link_bis_bibliothek(tmp_path, monkeypatch):
     assert eintrag["posting"]["text"]
     assert (ordner / "film_poster.jpg").exists()
     assert library.begleitzettel_lesen(ordner)["art"] == "webseite"
+
+
+# ── Sicherheit und Robustheit der Webaufnahme ────────────────────────────────
+
+def test_vorteile_als_zeichenkette_zerfallen_nicht_in_buchstaben(monkeypatch):
+    """Ein Modell lieferte „vorteile“ als eine Zeile — daraus wurden Einzelbuchstaben."""
+    antwort = {"marke": "Muster", "hook": "Strom vom Dach",
+               "vorteile": "Planung aus einer Hand, Montage in zwei Tagen; Förderung",
+               "cta": "Beratung"}
+    monkeypatch.setattr(webwerbung.llm, "erzeuge",
+                        lambda *_a, **_k: webwerbung.llm.Antwort(json.dumps(antwort),
+                                                                 "cli", "t", 0.1))
+    aufnahme = webaufnahme.Aufnahme(url="https://x.de/", host="x.de", texte=TEXTE)
+    konzept = webwerbung.konzept_erstellen(aufnahme, {})
+    assert konzept["vorteile"][:3] == ["Planung aus einer Hand", "Montage in zwei Tagen",
+                                       "Förderung"]
+
+
+def test_vorteile_ohne_liste_werden_verworfen():
+    assert webwerbung._als_liste({"a": 1}) == []
+    assert webwerbung._als_liste(None) == []
+    assert webwerbung._als_liste("• Eins\n• Zwei") == ["Eins", "Zwei"]
+    assert webwerbung._als_liste(["A", {"x": 1}, "B"]) == ["A", "B"]
+
+
+@pytest.mark.parametrize("adresse, oeffentlich", [
+    ("100.64.1.1", False),          # Anbieter-NAT (CGNAT) — `is_private` kannte es nicht
+    ("192.168.178.1", False), ("127.0.0.1", False), ("169.254.1.1", False),
+    ("::1", False), ("fc00::1", False), ("224.0.0.1", False),
+    ("64:ff9b::a00:1", False),      # NAT64 mit 10.0.0.1 darin
+    ("93.184.216.34", True), ("64:ff9b::452e:2e73", True),
+])
+def test_nur_globale_adressen_gelten_als_oeffentlich(adresse, oeffentlich):
+    import ipaddress
+    assert webaufnahme._ip_oeffentlich(ipaddress.ip_address(adresse)) is oeffentlich
+
+
+def test_name_auf_cgnat_adresse_wird_abgelehnt(monkeypatch):
+    monkeypatch.setattr(webaufnahme.socket, "getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("100.64.0.7", 0))])
+    assert webaufnahme._oeffentlich("router.beispiel.de") is False
+
+
+class _Anfrage:
+    def __init__(self, url, navigation=False, kaputt=False):
+        self.url, self._navigation, self._kaputt = url, navigation, kaputt
+
+    def is_navigation_request(self):
+        return self._navigation
+
+    @property
+    def headers(self):
+        return {}
+
+
+class _Route:
+    def __init__(self, url, **k):
+        self._anfrage = _Anfrage(url, **k)
+        self.ergebnis = ""
+
+    @property
+    def request(self):
+        if self._anfrage._kaputt:
+            raise RuntimeError("Anfrage nicht lesbar")
+        return self._anfrage
+
+    def abort(self):
+        self.ergebnis = "gesperrt"
+
+    def continue_(self):
+        self.ergebnis = "weiter"
+
+
+def test_netzfilter_loest_namen_auf_und_sperrt_im_zweifel(monkeypatch):
+    webaufnahme._oeffentlich_gemerkt.cache_clear()
+    namen = {"cdn.beispiel.de": "93.184.216.34", "intern.beispiel.de": "10.1.2.3"}
+    monkeypatch.setattr(webaufnahme.socket, "getaddrinfo",
+                        lambda host, *a, **k: [(2, 1, 6, "", (namen[host], 0))])
+    gesperrt: list[str] = []
+    filter_ = webaufnahme._netzfilter(gesperrt)
+
+    faelle = {
+        "https://cdn.beispiel.de/bild.jpg": "weiter",
+        "https://intern.beispiel.de/": "gesperrt",           # Name → privates Netz
+        "http://100.64.0.1/": "gesperrt",
+        "http://127.0.0.1:7788/api/logbuch": "gesperrt",
+        "data:image/png;base64,AAAA": "weiter",
+    }
+    for url, erwartet in faelle.items():
+        route = _Route(url)
+        filter_(route)
+        assert route.ergebnis == erwartet, url
+    assert gesperrt == []                      # keiner davon war ein Seitenwechsel
+
+    route = _Route("https://intern.beispiel.de/", navigation=True)
+    filter_(route)
+    assert route.ergebnis == "gesperrt" and gesperrt
+
+    route = _Route("https://cdn.beispiel.de/", kaputt=True)
+    filter_(route)
+    assert route.ergebnis == "gesperrt"        # Ausnahme → sperren, nicht durchlassen
+    webaufnahme._oeffentlich_gemerkt.cache_clear()
+
+
+def _aufnahme_vorbereiten(monkeypatch, playwright_fehler, gesperrt_melden=False):
+    monkeypatch.setattr(webaufnahme, "adresse_pruefen", lambda url: {
+        "url": "https://beispiel.de/", "host": "beispiel.de", "titel": "T"})
+    direkt = []
+
+    def playwright(aufnahme, ordner, abbruch, melden, gesperrt=None):
+        if gesperrt_melden and gesperrt is not None:
+            gesperrt.append("http://192.168.1.1/")
+        raise playwright_fehler
+
+    monkeypatch.setattr(webaufnahme, "_mit_playwright", playwright)
+    monkeypatch.setattr(webaufnahme, "_mit_browser_direkt",
+                        lambda *a, **k: direkt.append(True))
+    return direkt
+
+
+def test_sicherheitsfehler_faellt_nicht_auf_den_direktweg_zurueck(tmp_path, monkeypatch):
+    """Der Direktweg hat keinen Netzfilter. Hat Playwright eine Umleitung ins Heimnetz
+    gesperrt, darf er nicht einspringen und genau das fotografieren."""
+    direkt = _aufnahme_vorbereiten(monkeypatch, errors.EingabeFehler("privat"))
+    with pytest.raises(errors.EingabeFehler):
+        webaufnahme.aufnehmen("https://beispiel.de", tmp_path)
+    assert direkt == []
+
+
+def test_gesperrter_seitenwechsel_verhindert_den_direktweg(tmp_path, monkeypatch):
+    direkt = _aufnahme_vorbereiten(monkeypatch, RuntimeError("net::ERR_FAILED"),
+                                   gesperrt_melden=True)
+    with pytest.raises(errors.EingabeFehler):
+        webaufnahme.aufnehmen("https://beispiel.de", tmp_path)
+    assert direkt == []
+
+
+def test_gewoehnlicher_playwright_fehler_nutzt_den_direktweg(tmp_path, monkeypatch):
+    direkt = _aufnahme_vorbereiten(monkeypatch, RuntimeError("kein Browser"))
+    with pytest.raises(errors.VerarbeitungsFehler):     # Attrappe liefert kein Bild
+        webaufnahme.aufnehmen("https://beispiel.de", tmp_path)
+    assert direkt == [True]
+
+
+@pytest.fixture
+def netz_attrappe(monkeypatch):
+    """Ersetzt das Netz von `sicher_abrufen` durch eine Tabelle Adresse → Antwort."""
+    import httpx
+    antworten: dict = {}
+    echter_client = httpx.Client
+
+    def behandeln(anfrage):
+        erzeuger = antworten.get(str(anfrage.url))
+        if erzeuger is None:
+            return httpx.Response(404)
+        return erzeuger()
+
+    monkeypatch.setattr(webaufnahme.httpx, "Client",
+                        lambda **k: echter_client(transport=httpx.MockTransport(behandeln),
+                                                  **k))
+    monkeypatch.setattr(webaufnahme, "_oeffentlich",
+                        lambda host: host not in ("127.0.0.1", "localhost"))
+    return antworten
+
+
+def test_abruf_hat_eine_groessengrenze(netz_attrappe):
+    import httpx
+    netz_attrappe["https://x.de/gross.jpg"] = lambda: httpx.Response(
+        200, headers={"content-type": "image/jpeg"}, content=b"x" * 5000)
+    with pytest.raises(errors.EingabeFehler):
+        webaufnahme.sicher_abrufen("https://x.de/gross.jpg", hoechstbytes=1000)
+    gekuerzt = webaufnahme.sicher_abrufen("https://x.de/gross.jpg", hoechstbytes=1000,
+                                          abschneiden=True)
+    assert len(gekuerzt.content) == 1000
+
+
+def test_gepackter_inhalt_wird_nur_einmal_entpackt(netz_attrappe):
+    import gzip
+
+    import httpx
+    html_text = "<html><title>Grüße</title></html>"
+    netz_attrappe["https://x.de/"] = lambda: httpx.Response(
+        200, headers={"content-type": "text/html; charset=utf-8",
+                      "content-encoding": "gzip"},
+        content=gzip.compress(html_text.encode("utf-8")))
+    antwort = webaufnahme.sicher_abrufen("https://x.de/")
+    assert antwort.text == html_text
+    assert str(antwort.url) == "https://x.de/"
+
+
+def test_umleitung_ins_eigene_netz_wird_nicht_verfolgt(netz_attrappe):
+    import httpx
+    netz_attrappe["https://x.de/"] = lambda: httpx.Response(
+        302, headers={"location": "http://127.0.0.1:7788/api/logbuch"})
+    with pytest.raises(errors.EingabeFehler):
+        webaufnahme.sicher_abrufen("https://x.de/")
+
+
+def test_gesamtfrist_und_abbruch(netz_attrappe):
+    import threading
+
+    import httpx
+    netz_attrappe["https://x.de/"] = lambda: httpx.Response(200, content=b"ok")
+    with pytest.raises(httpx.TimeoutException):
+        webaufnahme.sicher_abrufen("https://x.de/", gesamtfrist=-1)
+    abbruch = threading.Event()
+    abbruch.set()
+    with pytest.raises(errors.AbbruchFehler):
+        webaufnahme.sicher_abrufen("https://x.de/", abbruch=abbruch)
+
+
+def test_vorschaubild_nur_aus_dem_oeffentlichen_netz(netz_attrappe, monkeypatch):
+    """og:image und Favicon lädt der Browser des Kunden direkt — eine Adresse im
+    Heimnetz oder ein `javascript:` hat dort nichts verloren."""
+    import httpx
+    monkeypatch.setattr(webaufnahme, "_oeffentlich_gemerkt",
+                        lambda host: not host.startswith("192.168."))
+    seite = ('<html><head><title>A &amp;amp; B</title>'
+             '<meta property="og:image" content="http://192.168.178.1/logo.png">'
+             '<link rel="icon" href="javascript:alert(1)"></head><body></body></html>')
+    netz_attrappe["https://x.de/"] = lambda: httpx.Response(
+        200, headers={"content-type": "text/html; charset=utf-8"}, content=seite.encode())
+    befund = webaufnahme.adresse_pruefen("https://x.de/")
+    assert befund["bild"] == ""
+    assert befund["favicon"] == ""
+    # Zeichenreferenzen werden genau einmal aufgelöst: „&amp;amp;“ steht für „&amp;“.
+    assert befund["titel"] == "A &amp; B"
+
+    seite = seite.replace("http://192.168.178.1/logo.png", "/bild.jpg")
+    netz_attrappe["https://x.de/"] = lambda: httpx.Response(
+        200, headers={"content-type": "text/html"}, content=seite.encode())
+    assert webaufnahme.adresse_pruefen("https://x.de/")["bild"] == "https://x.de/bild.jpg"

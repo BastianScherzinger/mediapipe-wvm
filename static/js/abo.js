@@ -15,6 +15,7 @@
 
   let stand = null;
   let wartetAufBestaetigung = false;
+  let abfrageBeendet = false;         // der Kunde hat das Hinweisfenster geschlossen
 
   MPW.abo = { aufbauen, laden };
 
@@ -95,6 +96,7 @@
     }
 
     wartetAufBestaetigung = true;
+    abfrageBeendet = false;
     zeichnen();
 
     let adresse = "";
@@ -114,6 +116,14 @@
     const bis = Date.now() + 305000;
     while (Date.now() < bis) {
       await new Promise((f) => setTimeout(f, 2000));
+      // Fenster geschlossen (Knopf oder Esc): nicht weiter nachfragen. Bestätigt der
+      // Kunde später doch noch im Browser, zeigt der nächste Klick auf „Prüfen“ das Abo.
+      if (abfrageBeendet) {
+        wartetAufBestaetigung = false;
+        zeichnen();
+        MPW.melden("Anmeldung nicht weiter abgewartet.", "info", 4000);
+        return;
+      }
       let jetzt;
       try {
         jetzt = (await MPW.hole("/api/abo/anmelden")).anmeldung;
@@ -152,6 +162,11 @@
     const fenster = el("dialog", { klasse: "schau abo-fenster", id: "abo-fenster" }, [
       el("div", { klasse: "schau-kopf" }, [
         el("h3", { text: "Higgsfield-Abo verbinden" }),
+        el("button", {
+          klasse: "knopf knopf-mini", type: "button", title: "Schließen",
+          "aria-label": "Schließen — nicht weiter auf die Bestätigung warten",
+          onclick: () => fenster.close(),
+        }, [MPW.icon("schliessen")]),
       ]),
       el("div", { klasse: "abo-inhalt" }, [
         el("p", { text: "Im Browser hat sich die Anmeldeseite von Higgsfield geöffnet. " +
@@ -179,6 +194,12 @@
         el("p", { klasse: "abo-warten", text: "Warte auf die Bestätigung …" }),
       ]),
     ]);
+    // Schließt der Kunde das Fenster selbst (Knopf oder Esc), endet das Abfragen.
+    // Schließt das Programm es, ist das Warten ohnehin vorbei.
+    fenster.addEventListener("close", () => {
+      if (fenster.dataset.vomProgramm !== "ja") abfrageBeendet = true;
+      fenster.remove();
+    });
     document.body.append(fenster);
     fenster.showModal();
   }
@@ -186,6 +207,7 @@
   function fensterSchliessen() {
     const fenster = $("#abo-fenster");
     if (fenster) {
+      fenster.dataset.vomProgramm = "ja";
       try { fenster.close(); } catch (e) { /* war schon zu */ }
       fenster.remove();
     }

@@ -24,13 +24,13 @@ auf einen Arbeitsrechner.
 from __future__ import annotations
 
 import hashlib
-import html
 import ipaddress
 import re
 import shutil
 import socket
 import subprocess
 import threading
+from functools import lru_cache
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -39,7 +39,7 @@ from pathlib import Path
 
 import httpx
 
-from . import config, errors, logbook
+from . import errors, logbook
 
 QUELLE = "Webseite"
 
@@ -123,24 +123,63 @@ def _oeffentlich(host: str) -> bool:
             ip = ipaddress.ip_address(adresse.split("%")[0])
         except ValueError:
             continue
-        ip = _entpackt(ip)
-        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
-                or ip.is_multicast or ip.is_unspecified):
+        if not _ip_oeffentlich(ip):
             return False
     return True
 
 
+def _ip_oeffentlich(ip) -> bool:
+    """Ist die Adresse im öffentlichen Internet erreichbar?
+
+    `is_global` statt einer Liste einzelner Merkmale: `is_private` kennt etwa das
+    Anbieter-NAT 100.64.0.0/10 (CGNAT) nicht, über das manche Router und VPNs ihre
+    Verwaltungsseiten anbieten. Multicast zählt nie als Webseite.
+    """
+    ip = _entpackt(ip)
+    return bool(ip.is_global) and not ip.is_multicast
+
+
+@lru_cache(maxsize=1024)
+def _oeffentlich_gemerkt(host: str) -> bool:
+    """`_oeffentlich` mit Gedächtnis — für die hundert Anfragen einer Seite, die
+    meist an eine Handvoll Namen gehen. Nur für den Netzfilter des Browsers gedacht."""
+    return _oeffentlich(host)
+
+
+#: Mehr lädt ein einzelner Abruf nicht — weder als Seite noch als Bild. Eine Seite, die
+#: endlos Daten schickt, soll den Rechner nicht volllaufen lassen.
+HOECHSTBYTES = 15 * 1024 * 1024
+
+
 def sicher_abrufen(url: str, *, kopf: dict | None = None, zeitlimit: float = 20,
-                   hoechstens: int = 6) -> httpx.Response:
+                   hoechstens: int = 6, hoechstbytes: int = HOECHSTBYTES,
+                   abschneiden: bool = False, gesamtfrist: float | None = 60,
+                   abbruch: threading.Event | None = None) -> httpx.Response:
     """Ein GET, der jede Weiterleitung einzeln prüft.
 
     Mit `follow_redirects=True` würde httpx einer Weiterleitung auf eine Adresse im
     eigenen Netz folgen und sie abfragen, **bevor** eine Prüfung greift. Deshalb werden
     Weiterleitungen hier von Hand verfolgt, und jeder Schritt muss öffentlich sein.
+
+    Der Inhalt wird gestreamt und höchstens `hoechstbytes` groß: Darüber wird er bei
+    `abschneiden=True` gekürzt (für HTML, das ohnehin nur vorne gelesen wird), sonst
+    abgelehnt (ein halbes Bild ist kein Bild). `zeitlimit` gilt je Lesevorgang — eine
+    Seite, die jede Sekunde ein Byte schickt, fiele da nie auf. Deshalb gibt es daneben
+    die `gesamtfrist` für den ganzen Abruf samt Weiterleitungen.
     """
+    begonnen = time.monotonic()
+
+    def frist_pruefen() -> None:
+        if abbruch is not None and abbruch.is_set():
+            raise errors.AbbruchFehler("Abgebrochen.", ursprung=QUELLE)
+        if gesamtfrist is not None and time.monotonic() - begonnen > gesamtfrist:
+            raise httpx.ReadTimeout(
+                f"Gesamtfrist von {gesamtfrist:.0f} Sekunden überschritten")
+
     aktuell = url
     with httpx.Client(timeout=zeitlimit, follow_redirects=False, headers=kopf or {}) as k:
         for _ in range(hoechstens):
+            frist_pruefen()
             teile = urllib.parse.urlsplit(aktuell)
             if teile.scheme.lower() not in ("http", "https") or \
                     not _oeffentlich((teile.hostname or "").lower()):
@@ -148,12 +187,32 @@ def sicher_abrufen(url: str, *, kopf: dict | None = None, zeitlimit: float = 20,
                     "Die Seite leitet auf eine nicht öffentliche Adresse um.",
                     "Es lassen sich nur öffentlich erreichbare Webseiten verwenden.",
                     ursprung=QUELLE)
-            antwort = k.get(aktuell)
-            ziel = antwort.headers.get("location")
-            if antwort.is_redirect and ziel:
-                aktuell = urllib.parse.urljoin(str(antwort.url), ziel)
-                continue
-            return antwort
+            with k.stream("GET", aktuell) as antwort:
+                ziel = antwort.headers.get("location")
+                if antwort.is_redirect and ziel:
+                    aktuell = urllib.parse.urljoin(str(antwort.url), ziel)
+                    continue
+                teile_inhalt: list[bytes] = []
+                gelesen = 0
+                for stueck in antwort.iter_bytes():
+                    frist_pruefen()
+                    teile_inhalt.append(stueck)
+                    gelesen += len(stueck)
+                    if gelesen > hoechstbytes:
+                        if not abschneiden:
+                            raise errors.EingabeFehler(
+                                "Die Datei ist zu groß.",
+                                f"Mehr als {hoechstbytes // (1024 * 1024)} MB werden "
+                                "nicht geladen.", ursprung=QUELLE)
+                        break
+                inhalt = b"".join(teile_inhalt)[:hoechstbytes]
+                # Der Inhalt ist schon entpackt — ohne diese Köpfe würde httpx ihn beim
+                # Zusammensetzen ein zweites Mal entpacken wollen.
+                koepfe = [(n, w) for n, w in antwort.headers.multi_items()
+                          if n.lower() not in ("content-encoding", "content-length",
+                                               "transfer-encoding")]
+                return httpx.Response(antwort.status_code, headers=koepfe,
+                                      content=inhalt, request=antwort.request)
     raise errors.NetzFehler("Die Webseite leitet zu oft weiter.",
                             "Bitte die Adresse prüfen, die im Browser am Ende erscheint.",
                             ursprung=QUELLE)
@@ -228,7 +287,8 @@ def adresse_pruefen(roh: str) -> dict:
     for versuch in kandidaten:
         try:
             antwort = sicher_abrufen(versuch, kopf={
-                "User-Agent": _UA_DESKTOP, "Accept-Language": "de-DE,de;q=0.9,en;q=0.6"})
+                "User-Agent": _UA_DESKTOP, "Accept-Language": "de-DE,de;q=0.9,en;q=0.6"},
+                abschneiden=True)
             break
         except httpx.HTTPError as fehler:
             letzter = fehler
@@ -262,19 +322,23 @@ def adresse_pruefen(roh: str) -> dict:
     except Exception:
         pass
     meta = leser.meta
-    titel = html.unescape(meta.get("og:title") or leser.titel or endhost)[:160]
-    beschreibung = html.unescape(meta.get("og:description") or
-                                 meta.get("description") or "")[:300]
+    # Kein zweites html.unescape: Der Leser entschlüsselt Zeichenreferenzen schon
+    # (convert_charrefs=True). Ein zweiter Durchgang machte aus einem wörtlich
+    # geschriebenen „&amp;amp;“ fälschlich „&“.
+    titel = (meta.get("og:title") or leser.titel or endhost)[:160]
+    beschreibung = (meta.get("og:description") or meta.get("description") or "")[:300]
     bild = meta.get("og:image") or meta.get("twitter:image") or ""
     return {
         "url": endadresse,
         "host": endhost.removeprefix("www."),
         "titel": titel,
         "beschreibung": beschreibung,
-        "bild": urllib.parse.urljoin(endadresse, bild) if bild else "",
-        "favicon": leser.icons[0] if leser.icons else
-                   f"{antwort.url.scheme}://{endhost}/favicon.ico",
-        "marke": html.unescape(meta.get("og:site_name") or "")[:80],
+        "bild": _nur_oeffentliche_adresse(urllib.parse.urljoin(endadresse, bild)
+                                          if bild else ""),
+        "favicon": _nur_oeffentliche_adresse(
+            leser.icons[0] if leser.icons else
+            f"{antwort.url.scheme}://{endhost}/favicon.ico"),
+        "marke": (meta.get("og:site_name") or "")[:80],
         "farbe": meta.get("theme-color", "")[:20],
         "ueberschriften": leser.ueberschriften[:12],
         "knoepfe": leser.knoepfe[:40],
@@ -282,6 +346,24 @@ def adresse_pruefen(roh: str) -> dict:
         "dauer_ms": int((time.monotonic() - begonnen) * 1000),
         "status": antwort.status_code,
     }
+
+
+def _nur_oeffentliche_adresse(adresse: str) -> str:
+    """Gibt eine Bildadresse nur zurück, wenn sie http(s) ist und ins öffentliche Netz
+    zeigt — sonst "". Die Oberfläche lädt Vorschaubild und Favicon direkt im Browser
+    des Kunden; ein `og:image` auf `http://192.168.178.1/…` hätte dessen Router
+    angesprochen, und `javascript:`/`data:` haben in einem `src` nichts verloren."""
+    adresse = (adresse or "").strip()
+    if not adresse:
+        return ""
+    teile = urllib.parse.urlsplit(adresse)
+    host = (teile.hostname or "").lower()
+    if teile.scheme.lower() not in ("http", "https") or not host:
+        return ""
+    try:
+        return adresse if _oeffentlich_gemerkt(host) else ""
+    except Exception:
+        return ""
 
 
 #: Links, hinter denen erfahrungsgemäß die guten Bilder liegen: der Shop, die Galerie,
@@ -308,7 +390,8 @@ def seite_lesen(url: str) -> dict:
     Browser bleibt daneben bestehen, sie zeigt das Aussehen der Seite.
     """
     antwort = sicher_abrufen(url, kopf={"User-Agent": _UA_DESKTOP,
-                                        "Accept-Language": "de-DE,de;q=0.9,en;q=0.6"})
+                                        "Accept-Language": "de-DE,de;q=0.9,en;q=0.6"},
+                             abschneiden=True)
     if antwort.status_code >= 400 or "html" not in \
             antwort.headers.get("content-type", "").lower():
         return {"url": url, "bilder": [], "links": []}
@@ -386,7 +469,7 @@ def motivbilder_laden(adressen: list[str], ordner: Path, *, hoechstens: int = 12
             continue
         try:
             antwort = sicher_abrufen(adresse, kopf={"User-Agent": _UA_DESKTOP},
-                                     zeitlimit=15)
+                                     zeitlimit=15, abbruch=abbruch)
             if antwort.status_code >= 400 or len(antwort.content) < 12000:
                 continue
             if not antwort.headers.get("content-type", "").lower().startswith("image/"):
@@ -540,12 +623,23 @@ def aufnehmen(url: str, ordner: Path, *, abbruch: threading.Event | None = None,
                                                     "farbe", "ueberschriften", "knoepfe")}
 
     gruende: list[str] = []
+    gesperrt: list[str] = []
     try:
-        _mit_playwright(aufnahme, ordner, abbruch, melden)
+        _mit_playwright(aufnahme, ordner, abbruch, melden, gesperrt)
         aufnahme.weg = "Playwright"
-    except errors.AbbruchFehler:
+    except (errors.AbbruchFehler, errors.EingabeFehler):
+        # Eine Sicherheitsprüfung hat angeschlagen (etwa eine Umleitung ins Heimnetz).
+        # Dann darf der Direktweg nicht einspringen — er hat keinen Netzfilter und
+        # würde genau das fotografieren, was eben gesperrt wurde.
         raise
     except Exception as fehler:
+        if gesperrt:
+            logbook.warnung(QUELLE, "Aufnahme abgebrochen: Die Seite wollte zu einer nicht "
+                                    "öffentlichen Adresse navigieren.")
+            raise errors.EingabeFehler(
+                "Die Seite leitet auf eine nicht öffentliche Adresse um.",
+                "Es lassen sich nur öffentlich erreichbare Webseiten verwenden.",
+                ursprung=QUELLE) from fehler
         gruende.append(f"Playwright: {type(fehler).__name__}: {str(fehler)[:160]}")
         logbook.info(QUELLE, "Aufnahme über Playwright nicht möglich — es wird der "
                              "Browser direkt verwendet.")
@@ -585,7 +679,8 @@ def _pruefe_abbruch(abbruch) -> None:
         raise errors.AbbruchFehler("Abgebrochen.", ursprung=QUELLE)
 
 
-def _mit_playwright(aufnahme: Aufnahme, ordner: Path, abbruch, melden) -> None:
+def _mit_playwright(aufnahme: Aufnahme, ordner: Path, abbruch, melden,
+                    gesperrt: list[str] | None = None) -> None:
     from playwright.sync_api import sync_playwright   # noqa: WPS433 — bewusst spät
 
     with sync_playwright() as pw:
@@ -606,7 +701,7 @@ def _mit_playwright(aufnahme: Aufnahme, ordner: Path, abbruch, melden) -> None:
                 viewport={"width": MOBIL_BREITE, "height": MOBIL_HOEHE},
                 device_scale_factor=MOBIL_FAKTOR, is_mobile=True, has_touch=True,
                 user_agent=_UA_MOBIL, locale="de-DE")
-            handy.route("**/*", _nur_oeffentlich)
+            handy.route("**/*", _netzfilter(gesperrt))
             seite = handy.new_page()
             _laden(seite, aufnahme.url)
             if melden:
@@ -633,7 +728,7 @@ def _mit_playwright(aufnahme: Aufnahme, ordner: Path, abbruch, melden) -> None:
             rechner = browser.new_context(viewport={"width": 1440, "height": 900},
                                           device_scale_factor=1, user_agent=_UA_DESKTOP,
                                           locale="de-DE")
-            rechner.route("**/*", _nur_oeffentlich)
+            rechner.route("**/*", _netzfilter(gesperrt))
             seite = rechner.new_page()
             _laden(seite, aufnahme.url)
             aufnahme.desktop = ordner / "aufnahme_desktop.png"
@@ -643,32 +738,52 @@ def _mit_playwright(aufnahme: Aufnahme, ordner: Path, abbruch, melden) -> None:
             browser.close()
 
 
-def _nur_oeffentlich(route) -> None:
+def _netzfilter(gesperrt: list[str] | None = None):
+    """Routen-Filter für Playwright, der gesperrte Seitenwechsel in `gesperrt` notiert."""
+    def filter_(route) -> None:
+        _nur_oeffentlich(route, gesperrt)
+    return filter_
+
+
+def _nur_oeffentlich(route, gesperrt: list[str] | None = None) -> None:
     """Sperrt jede Anfrage der fotografierten Seite an diesen Rechner oder das Heimnetz.
 
     Eine Webseite könnte per Skript `http://127.0.0.1:7788/…` laden — dann landete
-    etwa das Logbuch dieses Programms im Werbevideo. Geprüft wird ohne Namensauflösung
-    (sie kostete bei jeder der hundert Anfragen einer Seite Zeit): Namen wie
-    `localhost` und nackte private Adressen werden abgewiesen.
+    etwa das Logbuch dieses Programms im Werbevideo. Namen werden aufgelöst, das
+    Ergebnis wird gemerkt (die hundert Anfragen einer Seite gehen an wenige Namen).
+    Geht bei der Prüfung etwas schief, wird die Anfrage gesperrt, nicht durchgelassen.
+    Wird ein Seitenwechsel gesperrt, landet seine Adresse in `gesperrt` — daran erkennt
+    `aufnehmen`, dass der Direktweg ohne Filter nicht einspringen darf.
     """
     try:
-        host = (urllib.parse.urlsplit(route.request.url).hostname or "").lower()
-        privat = host in ("localhost",) or host.endswith((".local", ".localhost",
-                                                          ".internal"))
-        if not privat and host:
-            try:
-                ip = ipaddress.ip_address(host.strip("[]"))
-                privat = (ip.is_private or ip.is_loopback or ip.is_link_local or
-                          ip.is_reserved or ip.is_unspecified)
-            except ValueError:
-                pass
-        if privat:
-            route.abort()
-        else:
+        adresse = route.request.url
+        teile = urllib.parse.urlsplit(adresse)
+        host = (teile.hostname or "").lower()
+        if teile.scheme.lower() in ("data", "blob", "about"):
             route.continue_()
+            return
+        erlaubt = bool(host) and teile.scheme.lower() in ("http", "https", "ws", "wss")
+        if erlaubt:
+            if host in ("localhost",) or host.endswith((".local", ".localhost",
+                                                        ".internal")):
+                erlaubt = False
+            elif _ist_ip(host.strip("[]")):
+                erlaubt = _ip_oeffentlich(ipaddress.ip_address(host.strip("[]")))
+            else:
+                erlaubt = _oeffentlich_gemerkt(host)
+        if erlaubt:
+            route.continue_()
+            return
+        if gesperrt is not None:
+            try:
+                if route.request.is_navigation_request():
+                    gesperrt.append(adresse[:200])
+            except Exception:
+                gesperrt.append(adresse[:200])
+        route.abort()
     except Exception:
         try:
-            route.continue_()
+            route.abort()
         except Exception:
             pass
 
@@ -771,12 +886,21 @@ def _mit_browser_direkt(aufnahme: Aufnahme, ordner: Path, abbruch, melden) -> No
     if not programm:
         raise RuntimeError("Weder Edge noch Chrome gefunden.")
     profil = ordner / ".browserprofil"
+    # Ohne Playwright gibt es keinen Netzfilter je Anfrage. Was die Kommandozeile
+    # hergibt: Namen dieses Rechners laufen ins Leere, und der Browser setzt den
+    # Schutz vor Anfragen öffentlicher Seiten ins Heimnetz (Private Network Access)
+    # durch. Unbekannte Schalter übergeht der Browser stillschweigend.
+    schutz = ["--host-resolver-rules=MAP localhost ~NOTFOUND, MAP *.localhost ~NOTFOUND, "
+              "MAP *.local ~NOTFOUND, MAP *.internal ~NOTFOUND",
+              "--enable-features=BlockInsecurePrivateNetworkRequests,"
+              "PrivateNetworkAccessRespectPreflightResults,"
+              "PrivateNetworkAccessForNavigations"]
 
     def foto(ziel: Path, breite: int, hoehe: int, faktor: float, ua: str) -> Path:
         _pruefe_abbruch(abbruch)
         befehl = [programm, "--headless=new", "--disable-gpu", "--hide-scrollbars",
                   "--no-first-run", "--no-default-browser-check", "--mute-audio",
-                  f"--user-data-dir={profil}", f"--window-size={breite},{hoehe}",
+                  *schutz, f"--user-data-dir={profil}", f"--window-size={breite},{hoehe}",
                   f"--force-device-scale-factor={faktor}", f"--user-agent={ua}",
                   "--virtual-time-budget=9000", f"--screenshot={ziel}", aufnahme.url]
         subprocess.run(befehl, capture_output=True, timeout=90)
@@ -818,7 +942,8 @@ def _bilder_holen(adressen: list[str], ordner: Path, abbruch) -> list[Path]:
         if not str(adresse).startswith(("http://", "https://")):
             continue
         try:
-            antwort = sicher_abrufen(adresse, kopf={"User-Agent": _UA_DESKTOP})
+            antwort = sicher_abrufen(adresse, kopf={"User-Agent": _UA_DESKTOP},
+                                     abbruch=abbruch)
             if antwort.status_code >= 400 or len(antwort.content) < 15000:
                 continue
             if not antwort.headers.get("content-type", "").lower().startswith("image/"):

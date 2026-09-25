@@ -15,11 +15,16 @@
   let wiederholbar = "";              // Kennung des letzten gescheiterten Auftrags
   let reihe = [];
   let startdaten = null;
+  let sendetGerade = false;           // ein Auftrag ist unterwegs zum Server
+
+  //: Alle Knöpfe, die einen Auftrag abschicken. Während des Sendens sind sie gesperrt —
+  //: ein Doppelklick legte sonst zwei Aufträge an (und verbrauchte doppelt Guthaben).
+  const STARTKNOEPFE = ["#btn-start", "#btn-web-start", "#btn-pr-start"];
 
   // `pruefen` heißt nach außen so, wie der Knopf beschriftet ist. Die Abo-Anmeldung
   // ruft es auf, damit die Lampen sofort den neuen Zugang zeigen.
   MPW.start = { auftragStarten, auftragAbschicken, auftragAbbrechen, auftragWiederholen,
-                pruefen: selbsttest };
+                angenommen: nachDemAbschicken, pruefen: selbsttest };
 
   document.addEventListener("DOMContentLoaded", hochfahren);
 
@@ -42,7 +47,7 @@
     MPW.formular.aufbauen(start);
     MPW.webseite.aufbauen(start);
     MPW.premium.aufbauen(start);
-    MPW.bibliothek.aufbauen();
+    MPW.bibliothek.aufbauen(start);
     MPW.aktualisierung.aufbauen();
     MPW.abo.aufbauen();
 
@@ -161,6 +166,11 @@
    *  `melde(text, art)` schreibt in die Statuszeile des Bereichs, der ihn abgeschickt hat.
    *  Gibt zurück, ob der Server den Auftrag angenommen hat. */
   async function auftragAbschicken(auftrag, melde) {
+    // Ein zweiter Klick, während der erste noch unterwegs ist, bleibt folgenlos.
+    if (sendetGerade) return false;
+    sendetGerade = true;
+    startknoepfeSperren(true);
+
     // Läuft schon etwas, wird dieser Auftrag eingereiht statt abgewiesen. Der Ablauf
     // rechts darf dann NICHT zurückgesetzt werden — dort läuft ja noch der andere.
     const stelltSichAn = Boolean(laufenderAuftrag);
@@ -175,7 +185,21 @@
       melde(fehler.meldung || fehler.message, "fehler");
       MPW.melden(fehler.message, "fehler", 9000);
       return false;
+    } finally {
+      sendetGerade = false;
+      startknoepfeSperren(false);
     }
+  }
+
+  /** Sperrt die Startknöpfe fürs Senden — und gibt sie danach im Zustand frei, den
+   *  die Bereiche selbst vorsehen (der Premium-Knopf bleibt etwa gesperrt, solange
+   *  ein Auftrag läuft). */
+  function startknoepfeSperren(an) {
+    for (const auswahl of STARTKNOEPFE) {
+      const knopf = $(auswahl);
+      if (knopf) knopf.disabled = an;
+    }
+    if (!an) laeuftSetzen(Boolean(laufenderAuftrag));
   }
 
   function nachDemAbschicken(antwort, melde) {

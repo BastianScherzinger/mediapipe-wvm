@@ -32,7 +32,7 @@ import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from . import config, errors, logbook, media
 

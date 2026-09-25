@@ -20,6 +20,7 @@
     dauer: 20,
     stil: "energisch",
     prueftGerade: false,
+    laufendePruefung: null,  // Promise der gerade laufenden Prüfung — zum Abwarten
   };
 
   //: Farbe je Stil, nur für die Kachel — die Farben im Video kommen von der Webseite.
@@ -159,14 +160,24 @@
 
   /* ── Link prüfen ───────────────────────────────────────────────────────── */
 
-  async function pruefen() {
+  /** Prüft den eingegebenen Link. Läuft schon eine Prüfung, wird deren Ergebnis
+   *  abgewartet statt `null` zu liefern — sonst tat „Werbevideo erzeugen“ während
+   *  einer laufenden Prüfung einfach nichts. */
+  function pruefen() {
+    if (zustand.laufendePruefung) return zustand.laufendePruefung;
     const eingabe = $("#web-url").value.trim();
     if (!eingabe) {
       zeile("Bitte zuerst einen Link eingeben.", "fehler");
       $("#web-url").focus();
-      return null;
+      return Promise.resolve(null);
     }
-    if (zustand.prueftGerade) return null;
+    zustand.laufendePruefung = pruefenDurchfuehren(eingabe).finally(() => {
+      zustand.laufendePruefung = null;
+    });
+    return zustand.laufendePruefung;
+  }
+
+  async function pruefenDurchfuehren(eingabe) {
     zustand.prueftGerade = true;
     const knopf = $("#btn-web-pruefen");
     knopf.disabled = true;
@@ -232,6 +243,9 @@
   /* ── Starten ───────────────────────────────────────────────────────────── */
 
   async function starten() {
+    // Eine laufende Prüfung erst abwarten; passt ihr Ergebnis dann nicht mehr zur
+    // Eingabe (inzwischen geändert), wird neu geprüft.
+    if (zustand.laufendePruefung) await zustand.laufendePruefung;
     if (!zustand.geprueft || $("#web-url").value.trim() !== zustand.geprueftFuer) {
       const ergebnis = await pruefen();
       if (!ergebnis) return;

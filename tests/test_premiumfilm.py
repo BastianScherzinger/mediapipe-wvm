@@ -342,6 +342,7 @@ def test_auftrag_legt_beide_fassungen_ab(tmp_path, monkeypatch):
 
     eintrag = library.eintrag(ordner)
     assert eintrag["art"] == "premium"
+    assert eintrag["auftrag"] == auftrag.id, "ohne Kennung gibt es keinen Aufwerten-Knopf"
     assert eintrag["aufwand"]["tokens_gesamt"] == 10000
     assert "hoch" in eintrag["fassungen"], "die TikTok-Fassung muss in der Bibliothek stehen"
     assert eintrag["posting"]["text"].startswith("Jedes Teil")

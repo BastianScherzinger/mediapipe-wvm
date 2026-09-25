@@ -215,7 +215,26 @@ def eintrag(ordner: "str | Path") -> dict | None:
         # ältere zeigen die Angaben schlicht nicht.
         "art": zettel.get("art") or "video",
         "aufwand": zettel.get("aufwand") or {},
+        # Kennung des Auftrags, der das Video gebaut hat — die Kachel braucht sie für
+        # „Aufwerten“. Ältere Premium-Filme haben sie nicht im Zettel; dann wird im
+        # Auftragsspeicher nach dem Auftrag mit diesem Ordner gesucht.
+        "auftrag": zettel.get("auftrag") or (
+            _auftrag_zum_ordner(ordner) if zettel.get("art") == "premium" else ""),
     }
+
+
+def _auftrag_zum_ordner(ordner: Path) -> str:
+    """Der jüngste fertige Auftrag, der in diesem Ordner gearbeitet hat."""
+    from . import jobstore
+    try:
+        ziel = ordner.resolve()
+        for auftrag in jobstore.liste(grenze=200):
+            if (auftrag.ordner and auftrag.zustand == jobstore.FERTIG
+                    and Path(auftrag.ordner).resolve() == ziel):
+                return auftrag.id
+    except Exception:                   # die Bibliothek darf daran nie scheitern
+        return ""
+    return ""
 
 
 def _posting_aus(zettel: dict, ordner: Path) -> dict:

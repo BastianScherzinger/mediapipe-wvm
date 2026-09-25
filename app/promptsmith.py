@@ -418,7 +418,9 @@ def _hashtags(daten: dict) -> list[str]:
     if roh is None:
         return []
     if isinstance(roh, str):
-        roh = roh.replace("#", " ").split()
+        roh = re.split(r"[,;\n•·#\s]+", roh)
+    if isinstance(roh, tuple):
+        roh = list(roh)
     if not isinstance(roh, list):
         return []
 
@@ -587,7 +589,8 @@ def drehbuch_aus_dict(daten: dict) -> Drehbuch | None:
                     quelle=str(daten.get("quelle") or "übernommen"),
                     notbehelf=bool(daten.get("notbehelf")),
                     posting=str(daten.get("posting") or ""),
-                    hashtags=list(daten.get("hashtags") or []))
+                    # Nicht `list(...)`: Aus einer Zeichenkette würden sonst Einzelbuchstaben.
+                    hashtags=_hashtags({"hashtags": daten.get("hashtags")}))
 
 
 def eigenen_prompt_veredeln(prompt: str, *, sekunden: int = 5, modell: str = "",

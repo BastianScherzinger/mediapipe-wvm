@@ -323,6 +323,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   word-break: break-all;
 }
 .abo-knoepfe { display: flex; gap: var(--a2); flex-wrap: wrap; }
+/* Dialog „Aufwerten“ an Premium-Kacheln: nutzt den Rahmen des Abo-Fensters. */
+#aufwerten-fenster label { font-size: 13px; font-weight: 600; color: var(--text-2); }
+#aufwerten-fenster form { display: contents; }
 .abo-knoepfe .knopf { text-decoration: none; }
 .abo-warten {
   color: var(--akzent);

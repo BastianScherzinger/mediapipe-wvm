@@ -251,7 +251,8 @@ def konzept_erstellen(aufnahme, einstellungen: dict) -> dict:
                                 "Überschriften der Seite gebaut.")
         return grundlage
 
-    vorteile = [_kurz(v, 5, 34) for v in (daten.get("vorteile") or []) if str(v).strip()]
+    vorteile = [_kurz(v, 5, 34) for v in _als_liste(daten.get("vorteile"))
+                if str(v).strip()]
     konzept = {
         "marke": _kurz(daten.get("marke"), 4, 32) or grundlage["marke"],
         "hook": _kurz(daten.get("hook"), 8, 64) or grundlage["hook"],
@@ -264,6 +265,22 @@ def konzept_erstellen(aufnahme, einstellungen: dict) -> dict:
         "quelle": quelle,
     }
     return konzept
+
+
+def _als_liste(wert) -> list:
+    """Eine Aufzählung aus der Modellantwort als Liste.
+
+    Sprachmodelle liefern „vorteile“ gelegentlich als eine Zeile statt als Liste. Ohne
+    diese Prüfung zerfiel „Schnell, günstig, nah“ beim Durchlaufen in Einzelbuchstaben.
+    Zeichenketten werden an Komma, Semikolon, Zeilenumbruch und Aufzählungspunkt
+    geteilt; alles andere, was keine Liste ist, wird verworfen.
+    """
+    if isinstance(wert, str):
+        return [t.strip(" -–*\t") for t in re.split(r"[,;\n•·]+", wert)
+                if t.strip(" -–*\t")]
+    if isinstance(wert, (list, tuple)):
+        return [v for v in wert if isinstance(v, (str, int, float))]
+    return []
 
 
 # ── KI-Szene ─────────────────────────────────────────────────────────────────

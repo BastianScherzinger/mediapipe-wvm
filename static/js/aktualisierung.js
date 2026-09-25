@@ -19,6 +19,10 @@
   let stand = null;
   let laeuftGerade = false;
   let auftragLaeuft = false;
+  //: Startkennung des Servers, der diese Seite ausgeliefert hat („gestartet“ aus
+  //: /api/lebt). Ändert sie sich, läuft ein neuer Prozess — auch wenn der Neustart so
+  //: schnell ging, dass zwischendurch keine Anfrage ins Leere lief.
+  let bekannterStart = null;
 
   MPW.aktualisierung = { aufbauen, pruefen, auftragszustand };
 
@@ -33,6 +37,27 @@
     setInterval(() => pruefen(false), PRUEFTAKT);
 
     MPW.beiEreignis("neustart", () => aufNeustartWarten());
+    startkennungHolen().then((kennung) => { bekannterStart = kennung; });
+  }
+
+  /** Fragt /api/lebt. Zurück: {erreichbar, kennung} — kennung ist null, wenn der
+   *  Server (ältere Fassung) kein Feld „gestartet“ liefert. */
+  async function lebt() {
+    try {
+      const antwort = await fetch("/api/lebt", { cache: "no-store" });
+      if (!antwort.ok) return { erreichbar: false, kennung: null };
+      let daten = {};
+      try { daten = await antwort.json(); } catch (fehler) { /* ältere Fassung */ }
+      const kennung = daten && daten.gestartet !== undefined && daten.gestartet !== null
+        ? String(daten.gestartet) : null;
+      return { erreichbar: true, kennung };
+    } catch (fehler) {
+      return { erreichbar: false, kennung: null };
+    }
+  }
+
+  async function startkennungHolen() {
+    return (await lebt()).kennung;
   }
 
   /** Meldet, ob gerade ein Videoauftrag läuft — dann ist der Knopf gesperrt. */
@@ -74,7 +99,8 @@
       text.textContent = "Update ?";
     }
 
-    const gesperrt = laeuftGerade || (auftragLaeuft && stand.zustand === "verfuegbar");
+    // Während eines Auftrags bleibt der Knopf klickbar: Der Klick erklärt dann, warum
+    // es gerade nicht geht (siehe `anklicken`), statt stumm grau zu sein.
     knopf.disabled = laeuftGerade;
 
     const teile = [];
@@ -120,6 +146,9 @@
     laeuftGerade = true;
     zeichnen();
     MPW.melden("Neuer Stand wird geholt …", "info", 20000);
+    // Die Kennung unmittelbar vor dem Neustart — sie gehört sicher zum alten Prozess.
+    const vorher = await startkennungHolen();
+    if (vorher) bekannterStart = vorher;
 
     try {
       const antwort = await MPW.hole("/api/aktualisierung", { method: "POST" });
@@ -144,10 +173,15 @@
   /**
    * Wartet, bis der neu gestartete Server antwortet, und lädt dann die Seite neu.
    *
-   * Zuerst muss der alte Server wirklich weg sein — sonst würde die erste Anfrage noch
-   * beim sterbenden Prozess landen und die Seite zu früh neu laden.
+   * Erkannt wird der neue Server an seiner Startkennung („gestartet“): Weicht sie von
+   * der bekannten ab, antwortet ein anderer Prozess. So wird auch ein Neustart erkannt,
+   * der schneller ging als ein Abfragetakt. Liefert der Server keine Kennung (ältere
+   * Fassung), gilt die alte Regel: Erst muss der alte Server wirklich weg sein — sonst
+   * landete die erste Anfrage noch beim sterbenden Prozess und die Seite lüde zu früh.
    */
   async function aufNeustartWarten() {
+    if (aufNeustartWarten.aktiv) return;      // Ereignis und Klick rufen beide
+    aufNeustartWarten.aktiv = true;
     laeuftGerade = true;
     zeichnen();
 
@@ -156,25 +190,21 @@
 
     while (Date.now() < bis) {
       await new Promise((f) => setTimeout(f, 1200));
-      let erreichbar = false;
-      try {
-        const antwort = await fetch("/api/lebt", { cache: "no-store" });
-        erreichbar = antwort.ok;
-      } catch (fehler) {
-        erreichbar = false;
-      }
+      const { erreichbar, kennung } = await lebt();
 
       if (!erreichbar) {
         warWeg = true;                    // der alte Server ist beendet
         continue;
       }
-      if (warWeg) {                       // und der neue antwortet wieder
+      const neuerProzess = Boolean(kennung && bekannterStart && kennung !== bekannterStart);
+      if (warWeg || neuerProzess) {       // und der neue antwortet wieder
         MPW.melden("Neu gestartet. Die Ansicht wird aufgefrischt …", "erfolg", 4000);
         setTimeout(() => window.location.reload(), 700);
         return;
       }
     }
 
+    aufNeustartWarten.aktiv = false;
     laeuftGerade = false;
     zeichnen();
     MPW.melden("Das Programm meldet sich nicht zurück. Bitte von Hand neu starten.",

@@ -261,3 +261,20 @@ def test_deutsche_prompts_werden_erkannt():
         "Eine Bäckerei mit der Sonne und dem Licht durch das Fenster")
     assert not promptsmith._wirkt_deutsch(
         "Documentary photograph of hands kneading dough in warm morning light")
+
+
+# ── Hashtags in gespeicherten Drehbüchern ────────────────────────────────────
+
+def test_gespeicherte_hashtags_als_zeichenkette_zerfallen_nicht():
+    """`list("solar pv")` ergab früher Einzelbuchstaben als Hashtags."""
+    daten = {"titel": "T", "szenen": [{"nr": 1, "bild_prompt": "A cat", "dauer": 5}],
+             "hashtags": "#solar, #pv; mannheim"}
+    drehbuch = promptsmith.drehbuch_aus_dict(daten)
+    assert drehbuch.hashtags == ["solar", "pv", "mannheim"]
+
+
+def test_gespeicherte_hashtags_ohne_liste_werden_verworfen():
+    daten = {"szenen": [{"bild_prompt": "A cat"}], "hashtags": {"a": 1}}
+    assert promptsmith.drehbuch_aus_dict(daten).hashtags == []
+    daten["hashtags"] = ["solar", "pv"]
+    assert promptsmith.drehbuch_aus_dict(daten).hashtags == ["solar", "pv"]
