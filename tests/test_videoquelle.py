@@ -130,6 +130,13 @@ def test_leerer_topf_ohne_ausweg_wird_trotzdem_versucht(monkeypatch):
 
 # ── Ampel im Kopf ────────────────────────────────────────────────────────────
 
+def _schluessel_hinterlegt(monkeypatch):
+    """Die Ampel-Tests dürfen nicht davon abhängen, ob auf dem Prüfrechner zufällig ein
+    Schlüssel in der .env oder eine Abo-Anmeldung in data/ liegt."""
+    monkeypatch.setattr(higgsfield_mcp, "angemeldet", lambda: False)
+    monkeypatch.setattr(type(higgsfield.client), "verfuegbar", property(lambda self: True))
+
+
 def test_befund_ist_gruen_wenn_das_abo_verbunden_ist(monkeypatch):
     monkeypatch.setattr(higgsfield_mcp, "angemeldet", lambda: True)
     urteil = videoquelle.befund()
@@ -140,22 +147,26 @@ def test_befund_ist_gruen_wenn_das_abo_verbunden_ist(monkeypatch):
 def test_befund_ist_gelb_bei_leerem_topf(monkeypatch):
     """Die Ampel darf nicht grün leuchten, während nachweislich kein Guthaben da ist —
     sonst fällt es erst mitten im Auftrag auf."""
+    _schluessel_hinterlegt(monkeypatch)
     monkeypatch.setattr(higgsfield.client, "guthaben_bekannt",
                         lambda: {"guthaben": False, "zeitpunkt": time.time()})
     urteil = videoquelle.befund()
     assert urteil["zustand"] == "warnung"
+    assert "API-Topf ist leer" in urteil["meldung"]
     assert "Abo verbinden" in urteil["hinweis"]
 
 
 def test_befund_bleibt_ohne_erfahrung_gruen(monkeypatch):
     """Solange nichts Gegenteiliges bekannt ist, gilt ein hinterlegter Schlüssel als
     in Ordnung — Schwarzmalerei ohne Grund wäre genauso falsch wie Schönfärberei."""
+    _schluessel_hinterlegt(monkeypatch)
     monkeypatch.setattr(higgsfield.client, "guthaben_bekannt", dict)
     urteil = videoquelle.befund()
     assert urteil["zustand"] == "ok"
 
 
 def test_befund_meldet_fehler_ohne_jeden_weg(monkeypatch):
+    monkeypatch.setattr(higgsfield_mcp, "angemeldet", lambda: False)
     monkeypatch.setattr(config, "VIDEO_CHAIN", ("platform",))
     monkeypatch.setattr(type(higgsfield.client), "verfuegbar", property(lambda self: False))
     urteil = videoquelle.befund()
