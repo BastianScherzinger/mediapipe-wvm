@@ -63,7 +63,7 @@ def sicherer_pfad(relativ: str) -> Path:
     wurzel = config.OUTPUT_DIR.resolve()
     try:
         ziel = (wurzel / text).resolve()
-    except OSError as fehler:
+    except (OSError, ValueError) as fehler:        # ValueError: Nullbyte im Pfad
         raise errors.EingabeFehler("Der Pfad ist ungültig.", ursprung=QUELLE) from fehler
 
     if ziel != wurzel and wurzel not in ziel.parents:
@@ -282,6 +282,26 @@ def uebersicht() -> dict:
 
 # ── Formate nachträglich erzeugen ────────────────────────────────────────────
 
+def _in_bearbeitung(ordner: Path) -> bool:
+    """Arbeitet gerade ein Auftrag in diesem Ordner? Wiederholungen und Aufwertungen
+    eines Premium-Films laufen im Ordner ihres Vorgängers — der steht dabei sichtbar in
+    der Bibliothek."""
+    from . import jobstore
+    try:
+        ziel = ordner.resolve()
+        return any(a.ordner and Path(a.ordner).resolve() == ziel
+                   for a in jobstore.liste(grenze=20, nur_laufende=True))
+    except (OSError, ValueError):
+        return False
+
+
+def _nicht_in_bearbeitung(ordner: Path) -> None:
+    if _in_bearbeitung(ordner):
+        raise errors.EingabeFehler(
+            "An diesem Video wird gerade gearbeitet.",
+            "Bitte warten, bis der laufende Auftrag fertig ist.", ursprung=QUELLE)
+
+
 def format_nachziehen(ordner_relativ: str, kennung: str) -> dict:
     """Erzeugt eine fehlende Formatfassung. Wird von der Bibliothek aufgerufen, wenn
     jemand auf einen der Formatknöpfe klickt."""
@@ -297,6 +317,7 @@ def format_nachziehen(ordner_relativ: str, kennung: str) -> dict:
         raise errors.EingabeFehler(
             "In diesem Ordner liegt kein fertiger Film.",
             "Erwartet wird eine Datei namens film.mp4.", ursprung=QUELLE)
+    _nicht_in_bearbeitung(ordner)
 
     marke = ordner.name
     with _arbeitssperre:
@@ -354,8 +375,17 @@ def video_loeschen(ordner_relativ: str) -> dict:
         raise errors.EingabeFehler("Der Ausgabeordner selbst wird nicht gelöscht.",
                                    ursprung=QUELLE)
 
+    _nicht_in_bearbeitung(ordner)
+
     name = ordner.name
-    shutil.rmtree(ordner)
+    try:
+        shutil.rmtree(ordner)
+    except OSError as fehler:
+        # Unter Windows: eine Datei ist gerade geöffnet (Abspieler, Explorer).
+        raise errors.EingabeFehler(
+            "Das Video ließ sich nicht vollständig löschen.",
+            f"Vermutlich ist eine Datei darin gerade geöffnet. Systemmeldung: {fehler}",
+            ursprung=QUELLE) from fehler
     logbook.warnung(QUELLE, f"Video gelöscht: {name}")
     logbook.ereignis("bibliothek", {"grund": "gelöscht"})
     return {"ok": True, "geloescht": name}

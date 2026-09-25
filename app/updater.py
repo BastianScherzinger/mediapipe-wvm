@@ -19,11 +19,11 @@ Drei Dinge sind dabei wichtig:
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
 
 from . import config, errors, logbook
 
@@ -39,6 +39,8 @@ _sperre = threading.Lock()
 
 #: Läuft gerade ein Update? Solange nimmt die Ablaufsteuerung keine Aufträge an.
 _update_laeuft = threading.Event()
+#: Zwei gleichzeitige Klicks (zwei Fenster) ließen sonst git und pip parallel laufen.
+_update_sperre = threading.Lock()
 #: Ist ein Update geholt, aber der Neustart aufgeschoben, weil ein Auftrag lief?
 _neustart_offen = {"ja": False}
 
@@ -240,17 +242,45 @@ def aktualisieren(neustart: bool = True) -> dict:
         raise errors.KonfigurationsFehler(
             "Die Aktualisierung wurde nicht durchgeführt.", grund, ursprung=QUELLE)
 
+    if not _update_sperre.acquire(blocking=False):
+        raise errors.EingabeFehler("Es wird bereits aktualisiert.",
+                                   "Bitte einen Moment warten.", ursprung=QUELLE)
     _update_laeuft.set()
     try:
         return _aktualisieren(neustart)
     finally:
         _update_laeuft.clear()
+        _update_sperre.release()
+
+
+def _rauchtest() -> tuple[bool, str]:
+    """Lässt sich die neue Fassung überhaupt laden? In einem eigenen Prozess geprüft,
+    bevor der laufende beendet wird.
+
+    Ohne diese Probe startete nach einem Update, dessen neues Paket sich nicht
+    installieren ließ, ein Prozess, der beim ersten `import` starb — unter Windows in
+    einem Fenster, das sofort wieder zuging. Das Programm war einfach weg.
+    """
+    try:
+        lauf = subprocess.run([sys.executable, "-c", "import app.server"],
+                              cwd=str(config.BASE_DIR), capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=120)
+    except Exception as fehler:            # Probe nicht möglich — kein Grund zum Abbruch
+        logbook.warnung(QUELLE, f"Die neue Fassung ließ sich nicht probeweise laden "
+                                f"({type(fehler).__name__}).")
+        return True, ""
+    if lauf.returncode == 0:
+        return True, ""
+    letzte = [z for z in (lauf.stderr or "").strip().splitlines() if z.strip()]
+    return False, config.entschaerfe(letzte[-1][:300] if letzte else "")
 
 
 def _aktualisieren(neustart: bool) -> dict:
     from . import pipeline
 
     logbook.info(QUELLE, "Neuer Stand wird geholt …")
+    _, alter_stand = _git("rev-parse", "HEAD", zeitlimit=15)
+    alter_stand = alter_stand.strip()
     # Ausschließlich vorspulen: nie zusammenführen, nie etwas überschreiben.
     code, ausgabe = _git("pull", "--ff-only", "--quiet")
     if code != 0 and "tracking information" in ausgabe.lower():
@@ -271,9 +301,12 @@ def _aktualisieren(neustart: bool) -> dict:
     # Abbruch — meist ändert sich an den Abhängigkeiten gar nichts.
     logbook.info(QUELLE, "Abhängigkeiten werden geprüft …")
     try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q",
-                        "--disable-pip-version-check", "-r", "requirements.txt"],
-                       cwd=str(config.BASE_DIR), capture_output=True, timeout=300)
+        pip = subprocess.run([sys.executable, "-m", "pip", "install", "-q",
+                              "--disable-pip-version-check", "-r", "requirements.txt"],
+                             cwd=str(config.BASE_DIR), capture_output=True, timeout=300)
+        if pip.returncode:
+            logbook.warnung(QUELLE, f"Die Paketprüfung meldet Rückgabewert {pip.returncode} "
+                                    "— es wird geprüft, ob die neue Fassung trotzdem lädt.")
     except Exception as fehler:
         logbook.warnung(QUELLE, f"Pakete nicht geprüft ({type(fehler).__name__}) — "
                                 "das Programm startet trotzdem neu.")
@@ -290,6 +323,18 @@ def _aktualisieren(neustart: bool) -> dict:
                            cwd=str(config.BASE_DIR), capture_output=True, timeout=600)
         except Exception:
             pass
+
+    geladen, grund = _rauchtest()
+    if not geladen:
+        # Zurück auf den alten Stand — der läuft nachweislich. Die Arbeitskopie war
+        # vorher sauber (geprüft), `.env`, Videos und data/ fasst git nicht an.
+        if alter_stand and re.fullmatch(r"[0-9a-f]{7,40}", alter_stand):
+            _git("reset", "--hard", "--quiet", alter_stand, zeitlimit=60)
+        raise errors.KonfigurationsFehler(
+            "Die neue Fassung ließ sich nicht starten — es bleibt beim bisherigen Stand.",
+            f"Meldung beim Laden: {grund or 'keine'}. Meist fehlt ein Paket; im "
+            "Projektordner „python -m pip install -r requirements.txt“ ausführen und "
+            "dann erneut auf Update drücken.", ursprung=QUELLE)
 
     if not neustart:
         return {"ok": True, "version": stand["version"], "neustart": False,

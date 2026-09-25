@@ -254,13 +254,34 @@ def masked(wert: str) -> str:
     return f"{wert[:6]}…{wert[-4:]} ({len(wert)} Zeichen)"
 
 
+#: Zugangsdaten, die nicht aus der .env stammen — etwa die Marken der Abo-Anmeldung.
+#: Andere Module melden sie über `geheimnis_merken()`; so muss dieses Modul keines von
+#: ihnen importieren. Begrenzt, damit ein langer Betrieb keinen Speicher frisst.
+_WEITERE_GEHEIMNISSE: dict[str, None] = {}
+_WEITERE_GEHEIMNISSE_MAX = 32
+
+
+def geheimnis_merken(wert: str) -> None:
+    """Nimmt einen weiteren Wert in die Liste auf, die `entschaerfe()` schwärzt."""
+    wert = str(wert or "").strip()
+    if len(wert) <= 8 or wert in _WEITERE_GEHEIMNISSE:
+        return
+    while len(_WEITERE_GEHEIMNISSE) >= _WEITERE_GEHEIMNISSE_MAX:
+        try:
+            _WEITERE_GEHEIMNISSE.pop(next(iter(_WEITERE_GEHEIMNISSE)))
+        except (StopIteration, KeyError, RuntimeError):
+            break
+    _WEITERE_GEHEIMNISSE[wert] = None
+
+
 def entschaerfe(text: str) -> str:
     """Entfernt bekannte Zugangsdaten aus beliebigem Text. Letzte Sicherung, bevor etwas
     ins Log oder in eine Fehlermeldung gelangt — auch wenn eine Fremdbibliothek den
     Schlüssel in ihrer Ausnahme mitliefert."""
     if not text:
         return text
-    for geheim in (HIGGSFIELD_API_KEY, ANTHROPIC_KEY, CLAUDE_OAUTH_TOKEN):
+    for geheim in (HIGGSFIELD_API_KEY, ANTHROPIC_KEY, CLAUDE_OAUTH_TOKEN,
+                   *tuple(_WEITERE_GEHEIMNISSE)):
         if geheim and len(geheim) > 8:
             text = text.replace(geheim, "‹Zugangsdaten entfernt›")
             # Auch die Bestandteile eines ID:SECRET-Schlüssels einzeln ersetzen.
@@ -268,6 +289,37 @@ def entschaerfe(text: str) -> str:
                 if len(teil) > 12:
                     text = text.replace(teil, "‹Zugangsdaten entfernt›")
     return text
+
+
+def _portdatei() -> Path:
+    return DATA_DIR / "server.port"
+
+
+def port_merken(port: int) -> None:
+    """Hält fest, auf welchem Port der Server tatsächlich hört.
+
+    Er weicht aus, wenn 7788 belegt ist, und der Neustart nach einem Update gibt den
+    alten Port mit. Wer wissen will, ob schon ein Programmlauf aktiv ist (ein zweiter
+    Start, der Auftragsspeicher), muss dort nachsehen — sonst hält er den laufenden
+    Auftrag nebenan für eine Leiche.
+    """
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _portdatei().write_text(str(int(port)), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def bekannte_ports() -> list[int]:
+    """Der eingestellte Port und der zuletzt tatsächlich benutzte."""
+    ports = [PORT]
+    try:
+        gemerkt = int(_portdatei().read_text(encoding="utf-8").strip())
+        if 0 < gemerkt < 65536 and gemerkt not in ports:
+            ports.append(gemerkt)
+    except (OSError, ValueError):
+        pass
+    return ports
 
 
 # ── Startdiagnose ────────────────────────────────────────────────────────────

@@ -171,8 +171,10 @@ def main() -> int:
     # weiterlief. Ein doppelter Klick auf start.bat genügte dafür. Der Neustart nach
     # einem Update ist ausgenommen: Dort ist der alte Prozess gerade am Gehen.
     wunschport = argumente.port or config.PORT
-    if not os.environ.get("MPW_NEUSTART") and _laeuft_schon(wunschport):
-        adresse = f"http://{config.HOST}:{wunschport}"
+    laufend = next((p for p in dict.fromkeys([wunschport, *config.bekannte_ports()])
+                    if _laeuft_schon(p)), 0) if not os.environ.get("MPW_NEUSTART") else 0
+    if laufend:
+        adresse = f"http://{config.HOST}:{laufend}"
         print(f"  Das Programm läuft bereits: {adresse}")
         print(BALKEN + "\n")
         if not argumente.kein_fenster:

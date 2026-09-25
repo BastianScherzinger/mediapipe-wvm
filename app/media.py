@@ -18,7 +18,8 @@ mit jeder Installation.
 """
 from __future__ import annotations
 
-import json
+import collections
+import queue
 import re
 import shutil
 import subprocess
@@ -114,7 +115,12 @@ def _ffmpeg(argumente: list[str], *, beschreibung: str,
     befehl = [programm, "-hide_banner", "-nostdin", "-y",
               "-loglevel", "error", "-progress", "pipe:1", "-nostats", *argumente]
 
-    with _ffmpeg_schlange:
+    # Auf den freien Platz warten, aber dabei den Abbruch hören: Läuft gerade eine
+    # lange Formaterzeugung aus der Bibliothek, soll „Abbrechen“ nicht erst danach wirken.
+    while not _ffmpeg_schlange.acquire(timeout=0.5):
+        if abbruch is not None and abbruch.is_set():
+            raise errors.AbbruchFehler(f"{beschreibung} abgebrochen.", ursprung=QUELLE)
+    try:
         begonnen = time.monotonic()
         try:
             lauf = subprocess.Popen(befehl, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -122,6 +128,27 @@ def _ffmpeg(argumente: list[str], *, beschreibung: str,
         except OSError as fehler:
             raise errors.VerarbeitungsFehler(
                 "ffmpeg ließ sich nicht starten.", str(fehler), ursprung=QUELLE) from fehler
+
+        # Beide Ausgaben lesen eigene Fäden. Früher wurde stderr erst am Ende gelesen:
+        # Schrieb ffmpeg mehr, als die Leitung fasst (beschädigte Clips erzeugen
+        # Seiten voller Dekodierfehler), blieb es beim Schreiben hängen — und mit ihm
+        # der Auftrag, für immer, weil auch Zeitlimit und Abbruch nie mehr drankamen.
+        fehlerzeilen: collections.deque = collections.deque(maxlen=200)
+        zeilen: queue.Queue = queue.Queue()
+
+        def stderr_lesen() -> None:
+            for z in lauf.stderr or []:
+                fehlerzeilen.append(z)
+
+        def stdout_lesen() -> None:
+            for z in lauf.stdout or []:
+                zeilen.put(z)
+            zeilen.put(None)
+
+        leser = [threading.Thread(target=stderr_lesen, daemon=True),
+                 threading.Thread(target=stdout_lesen, daemon=True)]
+        for faden in leser:
+            faden.start()
 
         try:
             while True:
@@ -135,12 +162,12 @@ def _ffmpeg(argumente: list[str], *, beschreibung: str,
                         "Bei sehr langen Videos hilft eine kleinere Szenenzahl.",
                         ursprung=QUELLE)
 
-                zeile = lauf.stdout.readline() if lauf.stdout else ""
-                if not zeile:
-                    if lauf.poll() is not None:
-                        break
-                    time.sleep(0.05)
+                try:
+                    zeile = zeilen.get(timeout=0.5)
+                except queue.Empty:
                     continue
+                if zeile is None:
+                    break
 
                 if melden and gesamtdauer > 0 and zeile.startswith("out_time_ms="):
                     try:
@@ -153,11 +180,21 @@ def _ffmpeg(argumente: list[str], *, beschreibung: str,
                 lauf.wait(timeout=10)
             except Exception:
                 lauf.kill()
+                try:
+                    lauf.wait(timeout=10)
+                except Exception:
+                    pass
+            for faden in leser:
+                faden.join(timeout=2)
 
-        fehlertext = (lauf.stderr.read() if lauf.stderr else "") or ""
+        fehlertext = "".join(fehlerzeilen)
+    finally:
+        _ffmpeg_schlange.release()
 
     if lauf.returncode != 0:
-        knapp = " ".join(fehlertext.split())[:400]
+        # Das Ende zählt: Die entscheidende Zeile schreibt ffmpeg zuletzt, davor stehen
+        # womöglich Seiten voller Folgefehler.
+        knapp = " ".join(fehlertext.split())[-400:]
         raise errors.VerarbeitungsFehler(
             f"{beschreibung} ist fehlgeschlagen.",
             knapp or f"ffmpeg endete mit Rückgabewert {lauf.returncode}.",
@@ -373,15 +410,20 @@ def montieren(clips: list[Path], ziel: Path, *, weiche_uebergaenge: bool = True,
             if melden:
                 melden(0.6 * stelle / len(clips))
 
+        # Erst in eine Nebendatei, dann umbenennen: Eine gescheiterte Montage darf kein
+        # halbes film.mp4 hinterlassen, das die Bibliothek als fertiges Video zeigt.
+        vorlaeufig = arbeitsordner / f"film{ziel.suffix}"
         if len(angepasst) == 1:
-            shutil.copy2(angepasst[0], ziel)
+            shutil.copy2(angepasst[0], vorlaeufig)
         elif weiche_uebergaenge:
-            _mit_ueberblendung(angepasst, ziel, abbruch=abbruch,
+            _mit_ueberblendung(angepasst, vorlaeufig, abbruch=abbruch,
                                melden=lambda a: melden(0.6 + 0.4 * a) if melden else None)
         else:
-            _hart_aneinander(angepasst, ziel, abbruch=abbruch,
+            _hart_aneinander(angepasst, vorlaeufig, abbruch=abbruch,
                              melden=lambda a: melden(0.6 + 0.4 * a) if melden else None)
 
+        pruefe_video(vorlaeufig)
+        vorlaeufig.replace(ziel)
         daten = pruefe_video(ziel)
         logbook.erfolg(QUELLE, f"Film fertig: {ziel.name} · {daten.dauer:.1f} s · "
                                f"{daten.breite}×{daten.hoehe} · {daten.bytes / 1_048_576:.1f} MB")
@@ -396,9 +438,11 @@ def _hart_aneinander(clips: list[Path], ziel: Path,
     haben, genügt das Kopieren der Spuren — das ist um ein Vielfaches schneller als
     neu zu kodieren."""
     liste = ziel.parent / f".liste_{ziel.stem}.txt"
-    # ffmpeg erwartet einfache Anführungszeichen und maskiert solche im Pfad.
+    # ffmpeg erwartet einfache Anführungszeichen; ein Apostroph im Pfad (C:\\Users\\O'Brien)
+    # wird als '\'' geschrieben — Anführung schließen, maskiertes Zeichen, neu öffnen.
     liste.write_text(
-        "\n".join(f"file '{c.as_posix()}'" for c in clips), encoding="utf-8")
+        "\n".join("file '{}'".format(c.as_posix().replace("'", "'\\''")) for c in clips),
+        encoding="utf-8")
     try:
         _ffmpeg(["-f", "concat", "-safe", "0", "-i", str(liste), "-c", "copy", str(ziel)],
                 beschreibung="Szenen aneinanderhängen", abbruch=abbruch, melden=melden)
@@ -512,7 +556,14 @@ def format_erzeugen(quelle: "str | Path", ziel: "str | Path", kennung: str,
             raise errors.VerarbeitungsFehler("Das Vorschaubild wurde nicht erzeugt.",
                                              ursprung=QUELLE)
 
-        vorlaeufig.replace(ziel)
+        try:
+            vorlaeufig.replace(ziel)
+        except OSError as fehler:
+            # Unter Windows: Die Zieldatei ist gerade geöffnet (Vorschau im Browser).
+            raise errors.VerarbeitungsFehler(
+                f"{vorgabe.name} ließ sich nicht ablegen.",
+                f"Die Datei {ziel.name} ist vermutlich gerade geöffnet. Systemmeldung: "
+                f"{fehler}", ursprung=QUELLE) from fehler
     finally:
         if vorlaeufig.exists():
             vorlaeufig.unlink(missing_ok=True)

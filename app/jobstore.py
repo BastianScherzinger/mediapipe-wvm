@@ -53,12 +53,15 @@ def _programm_laeuft_bereits() -> bool:
     """
     import socket
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as verbindung:
-        verbindung.settimeout(0.4)
-        try:
-            return verbindung.connect_ex((config.HOST, config.PORT)) == 0
-        except OSError:
-            return False
+    for port in config.bekannte_ports():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as verbindung:
+            verbindung.settimeout(0.4)
+            try:
+                if verbindung.connect_ex((config.HOST, port)) == 0:
+                    return True
+            except OSError:
+                continue
+    return False
 
 
 @dataclass

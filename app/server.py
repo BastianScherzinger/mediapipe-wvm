@@ -20,12 +20,35 @@ import urllib.parse
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 from . import (bragagent, bragstudio, config, errors, higgsfield, higgsfield_mcp,
                jobstore, library, llm, logbook, media, pipeline, topics, updater,
                videoquelle, webaufnahme, webwerbung)
 
 QUELLE = "Server"
+
+#: Zeitpunkt des Prozessstarts — die Oberfläche erkennt daran einen Neustart, auch
+#: einen, der schneller ging, als sie nachgefragt hat.
+_GESTARTET = time.time()
+
+
+def json_objekt() -> dict:
+    """Der Körper einer Anfrage als Wörterbuch. Eine Liste oder ein Text statt eines
+    Objekts ist ein Bedienfehler (400), kein „Unerwarteter Fehler“ (500)."""
+    daten = request.get_json(silent=True)
+    if daten is None:
+        return {}
+    if not isinstance(daten, dict):
+        raise errors.EingabeFehler("Die Anfrage ist ungültig.",
+                                   "Erwartet wird ein Objekt mit benannten Feldern.",
+                                   ursprung=QUELLE)
+    return daten
+
+
+def _nur_texte(werte) -> list[str]:
+    return [str(w) for w in werte if isinstance(w, (str, int, float))] \
+        if isinstance(werte, (list, tuple)) else []
 
 
 def anwendung_bauen() -> Flask:
@@ -64,6 +87,13 @@ def anwendung_bauen() -> Flask:
     def unerwartet(fehler: Exception):
         """Letzte Auffanglinie: auch ein Programmierfehler erreicht die Oberfläche als
         verständliche Meldung — und wird protokolliert, damit er auffindbar bleibt."""
+        if isinstance(fehler, HTTPException):
+            # 405, 413 & Co. sind keine Programmfehler — mit ihrem eigenen Code melden.
+            meldung = {405: "Diese Aktion ist hier nicht möglich.",
+                       413: "Die Dateien sind zusammen zu groß (höchstens 250 MB)."}.get(
+                fehler.code or 0, fehler.name)
+            return jsonify({"ok": False, "fehler": True, "meldung": meldung,
+                            "hinweis": ""}), fehler.code or 400
         uebersetzt = errors.aus_ausnahme(fehler, ursprung=QUELLE)
         logbook.fehler(QUELLE, f"{request.path}: {uebersetzt.meldung}")
         return schlecht(uebersetzt, 500)
@@ -88,8 +118,12 @@ def anwendung_bauen() -> Flask:
             return None                      # kein Browser — z. B. die Testsuite
         teile = urllib.parse.urlsplit(herkunft)
         eigener_port = request.host.rsplit(":", 1)[1] if ":" in request.host else ""
+        try:
+            fremder_port = str(teile.port or "")
+        except ValueError:                   # „Origin: http://127.0.0.1:abc“
+            fremder_port = "?"
         if ((teile.hostname or "") not in ("127.0.0.1", "localhost")
-                or str(teile.port or "") != eigener_port):
+                or fremder_port != eigener_port):
             logbook.warnung(QUELLE, f"Fremde Anfrage abgewiesen: {request.path} "
                                     f"von {herkunft[:80]}")
             return schlecht(errors.EingabeFehler("Anfrage abgewiesen.", ursprung=QUELLE), 403)
@@ -222,7 +256,7 @@ def anwendung_bauen() -> Flask:
                 "Es läuft gerade ein Auftrag.",
                 "Bitte erst abwarten — ein Wechsel des Zugangs mitten im Lauf würde "
                 "die Szenen auseinanderlaufen lassen.", ursprung=QUELLE)
-        daten = request.get_json(silent=True) or {}
+        daten = json_objekt()
         ergebnis = higgsfield_mcp.anmeldung_starten(
             browser_oeffnen=daten.get("browser", True) is not False)
         return gut({"anmeldung": ergebnis})
@@ -233,6 +267,13 @@ def anwendung_bauen() -> Flask:
 
     @app.post("/api/abo/abmelden")
     def abo_abmelden():
+        if pipeline.laeuft_gerade():
+            # Mitten im Warten auf ein bezahltes Video abgemeldet, scheiterte die nächste
+            # Statusabfrage — und der ganze Auftrag mit ihm.
+            raise errors.EingabeFehler(
+                "Es läuft gerade ein Auftrag.",
+                "Bitte erst abwarten — ohne Anmeldung ließe sich das bezahlte Video "
+                "nicht mehr abholen.", ursprung=QUELLE)
         return gut(higgsfield_mcp.abmelden())
 
     @app.post("/api/wege-zuruecksetzen")
@@ -248,11 +289,11 @@ def anwendung_bauen() -> Flask:
     def briefing_vorschau():
         """Baut aus den Formulardaten den Briefingtext — die Oberfläche zeigt ihn an,
         bevor etwas gestartet wird. Kein Rätselraten, was gleich an Claude geht."""
-        daten = request.get_json(silent=True) or {}
+        daten = json_objekt()
         text = topics.briefing_bauen(
             str(daten.get("thema") or ""),
             str(daten.get("betreff") or ""),
-            list(daten.get("argumente") or []),
+            _nur_texte(daten.get("argumente") or []),
             {"zielgruppe": daten.get("zielgruppe"), "botschaft": daten.get("botschaft")})
         return gut({"briefing": text})
 
@@ -261,7 +302,7 @@ def anwendung_bauen() -> Flask:
     @app.post("/api/webseite/pruefen")
     def webseite_pruefen():
         """Prüft einen Link, bevor ein Auftrag daraus wird — Vorschau für die Oberfläche."""
-        daten = request.get_json(silent=True) or {}
+        daten = json_objekt()
         pruefung = webaufnahme.adresse_pruefen(str(daten.get("url") or ""))
         return gut({"webseite": {k: pruefung.get(k) for k in (
             "url", "host", "titel", "beschreibung", "bild", "favicon", "marke",
@@ -299,7 +340,7 @@ def anwendung_bauen() -> Flask:
         beide Kompositionen sind da. Claude bekommt nur die Mängelliste und rendert neu.
         Das kostet einen Bruchteil eines Neubaus — beim Kontingent wie an Zeit.
         """
-        daten = request.get_json(silent=True) or {}
+        daten = json_objekt()
         vorher = jobstore.holen(kennung)
         if vorher is None or not (vorher.einstellungen or {}).get("premium"):
             raise errors.EingabeFehler(
@@ -340,7 +381,7 @@ def anwendung_bauen() -> Flask:
 
     @app.post("/api/premium/ordner/pruefen")
     def premium_ordner_pruefen():
-        daten = request.get_json(silent=True) or {}
+        daten = json_objekt()
         return gut({"ordner": bragstudio.ordner_pruefen(str(daten.get("ordner") or ""))})
 
     # ── Aufträge ─────────────────────────────────────────────────────────────
@@ -353,7 +394,7 @@ def anwendung_bauen() -> Flask:
         Clips an einem Nachmittag — hieß das: danebensitzen und warten. Jetzt wird
         eingereiht; die Antwort sagt, ob der Auftrag läuft oder ansteht.
         """
-        daten = request.get_json(silent=True) or {}
+        daten = json_objekt()
         # Wiederholen geht nur über die eigene Route — sie prüft, ob der alte Auftrag
         # wirklich gescheitert und nicht schon wiederholt ist.
         daten.pop("wiederholung_von", None)
@@ -413,6 +454,13 @@ def anwendung_bauen() -> Flask:
     @app.delete("/api/auftrag/<kennung>")
     def auftrag_loeschen(kennung: str):
         """Entfernt nur den Eintrag, nie die Videodateien."""
+        auftrag = jobstore.holen(kennung)
+        if auftrag is not None and (kennung == pipeline.laeuft_gerade()
+                                    or auftrag.zustand in (jobstore.WARTEND,
+                                                           jobstore.LAEUFT)):
+            raise errors.EingabeFehler(
+                "Dieser Auftrag läuft oder wartet noch.",
+                "Erst abbrechen bzw. aus der Reihe nehmen, dann löschen.", ursprung=QUELLE)
         return gut({"geloescht": jobstore.loeschen(kennung)})
 
     # ── Logbuch und Ereignisstrom ────────────────────────────────────────────
@@ -452,19 +500,19 @@ def anwendung_bauen() -> Flask:
 
     @app.post("/api/bibliothek/format")
     def bibliothek_format():
-        daten = request.get_json(silent=True) or {}
+        daten = json_objekt()
         ergebnis = library.format_nachziehen(str(daten.get("ordner") or ""),
                                              str(daten.get("format") or ""))
         return gut(ergebnis)
 
     @app.post("/api/bibliothek/alle-formate")
     def bibliothek_alle_formate():
-        daten = request.get_json(silent=True) or {}
+        daten = json_objekt()
         return gut(library.alle_formate_nachziehen(str(daten.get("ordner") or "")))
 
     @app.post("/api/bibliothek/umbenennen")
     def bibliothek_umbenennen():
-        daten = request.get_json(silent=True) or {}
+        daten = json_objekt()
         return gut(library.video_umbenennen(str(daten.get("ordner") or ""),
                                             str(daten.get("titel") or "")))
 
@@ -472,7 +520,7 @@ def anwendung_bauen() -> Flask:
     def bibliothek_loeschen():
         """Löscht ein Video mitsamt Ordner. Die Rückfrage stellt die Oberfläche;
         hier muss die Bestätigung ausdrücklich mitgeschickt werden."""
-        daten = request.get_json(silent=True) or {}
+        daten = json_objekt()
         if daten.get("bestaetigt") is not True:
             raise errors.EingabeFehler(
                 "Das Löschen wurde nicht bestätigt.",
@@ -481,7 +529,7 @@ def anwendung_bauen() -> Flask:
 
     @app.post("/api/bibliothek/explorer")
     def bibliothek_explorer():
-        daten = request.get_json(silent=True) or {}
+        daten = json_objekt()
         return gut(library.im_explorer_zeigen(str(daten.get("ordner") or "")))
 
     # ── Medien ausliefern ────────────────────────────────────────────────────
@@ -538,6 +586,11 @@ def anwendung_bauen() -> Flask:
             raise errors.EingabeFehler(
                 "Es läuft gerade ein Auftrag.",
                 "Bitte warten oder abbrechen.", ursprung=QUELLE)
+        if pipeline.warteschlange():
+            raise errors.EingabeFehler(
+                "Es warten noch Aufträge.",
+                "Ein Neustart würde sie verwerfen. Bitte abwarten oder die Reihe leeren.",
+                ursprung=QUELLE)
         logbook.info(QUELLE, "Neustart auf Wunsch.")
         logbook.ereignis("neustart", {"grund": "auf Wunsch"})
         updater.neu_starten()
@@ -548,7 +601,8 @@ def anwendung_bauen() -> Flask:
     @app.get("/api/lebt")
     def lebt():
         """Wird vom Starter abgefragt, um zu erkennen, wann der Server bereit ist."""
-        return gut({"zeit": time.time(), "version": config.APP_VERSION})
+        return gut({"zeit": time.time(), "version": config.APP_VERSION,
+                    "gestartet": _GESTARTET})
 
     return app
 
@@ -560,6 +614,7 @@ def starten(host: str = "", port: int = 0, entwicklung: bool = False) -> None:
     host = host or config.HOST
     port = port or config.PORT
 
+    config.port_merken(port)
     logbook.erfolg(QUELLE, f"{config.APP_NAME} {config.APP_VERSION} läuft auf "
                            f"http://{host}:{port}")
     if entwicklung:
