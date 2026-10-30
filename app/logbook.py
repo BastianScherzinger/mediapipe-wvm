@@ -65,6 +65,7 @@ def _datei() -> Any:
 
 
 def _in_datei(eintrag: dict) -> None:
+    """Schreibt einen Eintrag in die Tageslogdatei."""
     datei = _datei()
     if datei is None:
         return
@@ -79,8 +80,8 @@ def _in_datei(eintrag: dict) -> None:
 # ── Verteilung ───────────────────────────────────────────────────────────────
 
 def _sende(nachricht: dict) -> None:
-    """Nachricht an alle Abonnenten. Ein voller Abonnent verliert seine ältesten
-    Nachrichten, statt den Aufrufer zu blockieren."""
+    """Sendet eine Nachricht an alle Abonnenten. Ein voller Abonnent verliert
+    seine ältesten Nachrichten, statt den Aufrufer zu blockieren."""
     with _sperre:
         empfaenger = list(_abonnenten)
     for q in empfaenger:
@@ -103,12 +104,14 @@ def abonnieren() -> queue.Queue:
 
 
 def abbestellen(q: queue.Queue) -> None:
+    """Entfernt eine Warteschlange aus der Abonnentenliste."""
     with _sperre:
         if q in _abonnenten:
             _abonnenten.remove(q)
 
 
 def anzahl_abonnenten() -> int:
+    """Gibt die Anzahl aktiver Abonnenten zurück."""
     with _sperre:
         return len(_abonnenten)
 
@@ -148,22 +151,27 @@ def log(ebene: str, quelle: str, text: str, *, details: dict | None = None,
 
 
 def debug(quelle: str, text: str, **kw) -> dict:
+    """Schreibt eine Logzeile mit der Ebene 'debug'."""
     return log("debug", quelle, text, **kw)
 
 
 def info(quelle: str, text: str, **kw) -> dict:
+    """Schreibt eine Logzeile mit der Ebene 'info'."""
     return log("info", quelle, text, **kw)
 
 
 def erfolg(quelle: str, text: str, **kw) -> dict:
+    """Schreibt eine Logzeile mit der Ebene 'erfolg'."""
     return log("erfolg", quelle, text, **kw)
 
 
 def warnung(quelle: str, text: str, **kw) -> dict:
+    """Schreibt eine Logzeile mit der Ebene 'warnung'."""
     return log("warnung", quelle, text, **kw)
 
 
 def fehler(quelle: str, text: str, **kw) -> dict:
+    """Schreibt eine Logzeile mit der Ebene 'fehler'."""
     return log("fehler", quelle, text, **kw)
 
 

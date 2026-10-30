@@ -21,6 +21,7 @@ def _sdk():
 
 
 def bereit() -> tuple[bool, str]:
+    """Prüft, ob der Claude-API-Weg genutzt werden kann."""
     if not config.ANTHROPIC_KEY:
         return False, "kein ANTHROPIC_KEY in der .env"
     if _sdk() is None:
@@ -29,10 +30,12 @@ def bereit() -> tuple[bool, str]:
 
 
 def modellname() -> str:
+    """Gibt den konfigurierten Claude-Modellnamen zurück."""
     return config.CLAUDE_API_MODEL
 
 
 def erzeuge(system: str, auftrag: str, *, zeitlimit: int = 240) -> str:
+    """Erzeugt eine Antwort über die Anthropic Messages API."""
     anthropic = _sdk()
     if anthropic is None:
         raise errors.KonfigurationsFehler(

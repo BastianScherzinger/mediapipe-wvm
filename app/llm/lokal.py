@@ -37,10 +37,12 @@ def bereit() -> tuple[bool, str]:
 
 
 def modellname() -> str:
+    """Gibt den in der Konfiguration eingestellten Namen des lokalen Modells zurück."""
     return config.LOCAL_MODEL
 
 
 def vorhandene_modelle() -> list[str]:
+    """Liest die bei Ollama vorhandenen Modellnamen; bei Fehlern eine leere Liste."""
     try:
         with httpx.Client(timeout=5) as klient:
             daten = klient.get(f"{config.OLLAMA_URL}/api/tags").json()
@@ -101,6 +103,10 @@ def modell_laden(name: str) -> None:
 
 
 def erzeuge(system: str, auftrag: str, *, zeitlimit: int = 240) -> str:
+    """Erzeugt über die lokale Ollama-Schnittstelle eine Antwort auf den Auftrag.
+
+    Lädt das Modell bei Bedarf nach und liefert den Antworttext ohne Rand-Leerzeichen.
+    """
     name = config.LOCAL_MODEL
     if not _modell_da(name):
         if not config.LOCAL_AUTOPULL:

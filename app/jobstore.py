@@ -82,9 +82,11 @@ class Auftrag:
 
     @property
     def laeuft_noch(self) -> bool:
+        """Gibt an, ob der Auftrag wartet oder läuft."""
         return self.zustand in (WARTEND, LAEUFT)
 
     def als_dict(self) -> dict:
+        """Gibt die Auftragsfelder und das gerundete Alter in Sekunden als Wörterbuch zurück."""
         return {
             "id": self.id, "angelegt": self.angelegt, "geaendert": self.geaendert,
             "zustand": self.zustand, "block": self.block, "titel": self.titel,
@@ -167,6 +169,7 @@ def _aus_zeile(zeile: sqlite3.Row) -> Auftrag:
 
 
 def anlegen(briefing: str, einstellungen: dict, titel: str = "") -> Auftrag:
+    """Speichert einen neuen wartenden Auftrag und gibt ihn zurück."""
     jetzt = time.time()
     auftrag = Auftrag(
         id=uuid.uuid4().hex[:12], angelegt=jetzt, geaendert=jetzt,
@@ -201,6 +204,7 @@ def aktualisieren(auftrag_id: str, **felder) -> None:
 
 
 def holen(auftrag_id: str) -> Auftrag | None:
+    """Lädt den Auftrag zur Kennung oder gibt None zurück, wenn er fehlt."""
     with _verbindung() as verbindung:
         zeile = verbindung.execute("SELECT * FROM auftraege WHERE id=?",
                                    (auftrag_id,)).fetchone()
@@ -208,6 +212,7 @@ def holen(auftrag_id: str) -> Auftrag | None:
 
 
 def liste(grenze: int = 50, nur_laufende: bool = False) -> list[Auftrag]:
+    """Lädt Aufträge nach Anlagezeit absteigend mit begrenzter Anzahl. Optional werden nur wartende und laufende Aufträge berücksichtigt."""
     frage = "SELECT * FROM auftraege"
     werte: list = []
     if nur_laufende:
@@ -226,6 +231,7 @@ def laufender() -> Auftrag | None:
 
 
 def loeschen(auftrag_id: str) -> bool:
+    """Löscht den Datenbankeintrag zur Kennung und meldet, ob ein Eintrag gelöscht wurde."""
     with _sperre, _verbindung() as verbindung:
         ergebnis = verbindung.execute("DELETE FROM auftraege WHERE id=?", (auftrag_id,))
     return ergebnis.rowcount > 0
