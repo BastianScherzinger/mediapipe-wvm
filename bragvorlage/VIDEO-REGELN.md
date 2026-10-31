@@ -29,7 +29,7 @@ Die Regeln stammen aus vielen abgenommenen und abgelehnten Filmen. Sie werden la
 16. **Eine Einstellung, ein Block, eine Aussage.** Jede Zahl und jede Zusage genau einmal. Keine eigene Karte für eine Folgerung.
 17. **Wenig Text, groß.** Etwa 3 bis 5 Wörter je Einstellung; die Kernaussage steht auch ohne Ton im Bild.
 18. **Jede Szene ist in einer Sekunde verständlich.** Fachbegriffe werden übersetzt. Komplexes wird in einfache Bilder verpackt.
-19. **Erst verständlich, dann animiert.** Eine Animation, die niemand versteht, ist Dekoration. Bei Erklärvideos lieber mehrere kurze Teile mit je einer Geschichte als ein überladenes Video.
+19. **Erst verständlich, dann animiert.** Eine Animation, die niemand versteht, ist Dekoration. Erklärvideos sind EIN Video mit rotem Faden (Kapitel sichtbar), in dem der Zuschauer von Anfang bis Ende sieht, was gemacht wird und was es ihm bringt – nicht mehrere lose Teile und nicht überladen.
 20. **Bild und Wort passen zusammen.** Was gesagt oder eingeblendet wird, zeigt die Szene genau so. Zahlen kommen aus dem Bild (zum Beispiel Anzeige im Spiel), nicht aus dem Gedächtnis.
 21. **Echte Belege zeigen,** wo es sie gibt (echte Seite, echtes Diagramm, echter Einsatz), mit Stand-Datum und Freigabe. Vorher/Nachher nur aus demselben Raum oder derselben Seite.
 22. **Echte Aufnahmen vor Erfindungen.** Bei Spielen und Produkten echte Aufnahmen verwenden, keine Konzeptbilder im Werbeclip.
@@ -69,7 +69,14 @@ Die Regeln stammen aus vielen abgenommenen und abgelehnten Filmen. Sie werden la
 46. **Mit Ton ansehen.** „Gemessen“ ist nicht „gehört“. Vor dem Versand das ganze Video mit Ton anschauen und fragen: Klingt es natürlich? Zeigt jede Szene ihren Satz? Würde ich weiterschauen?
 47. **Zwei gleiche Mängel bedeuten: Bauform wechseln,** nicht Pixel schieben.
 
+## Dramaturgie
+48. **Spannung = Ruhe, Verdichtung, kurze Stille, Entladung.** Vor dem großen Moment 0,2–0,3 s fast nichts, dann der Schlag.
+49. **Reveal = erst zählen, dann krönen.** Mehrere Stücke schnell im festen Takt, dann das Hauptstück langsam, groß, mit Licht und Titel.
+50. **Zwei Ebenen gleichzeitig:** Gefühl im Bild, Beleg als zweite Ebene (z. B. Zähler, der über Szenen weiterläuft).
+51. **Ton-Einsätze gemessen auf dem Bild** (±50 ms, keine stillen Löcher über 1,5 s) und Wünsche des Auftraggebers als Richtung lesen, nicht wörtlich: daraus die stärkste Story bauen.
+
 ## Änderungsprotokoll
 | Datum | Änderung |
 |---|---|
 | 31.10.2026 | Erstfassung, 47 Regeln aus abgenommenen und abgelehnten Filmen. |
+| 31.10.2026 abends | Regel 19 geändert (Erklärvideo = ein Video mit rotem Faden), Abschnitt Dramaturgie 48–51 aus einem abgenommenen Startvideo. |
