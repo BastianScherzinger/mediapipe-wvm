@@ -214,11 +214,24 @@ def test_jede_sorte_hat_einen_eigenen_bauplan():
 def test_handwerkswissen_liegt_bei():
     """Der Agent liest es bei jedem Dienstleistungsfilm — fehlt es, baut er ins Blaue."""
     vorlage = config.BASE_DIR / "bragvorlage"
-    for datei in ("REZEPT.md", "HANDWERK-werbefilm.md",
+    for datei in ("REZEPT.md", "HANDWERK-werbefilm.md", "VIDEO-REGELN.md",
                   "referenz-dienstleistung-hochformat.html",
                   "referenz-querformat.html", "referenz-hochformat.html"):
         assert (vorlage / datei).exists(), f"{datei} fehlt"
     assert "HANDWERK-werbefilm.md" in bragstudio._AGENT_VORSPANN
+    assert "VIDEO-REGELN.md" in bragstudio._AGENT_VORSPANN
+
+
+def test_video_regeln_sind_oeffentlich_unbedenklich():
+    """Das Repository ist öffentlich: keine Kundennamen, Pfade, Preise, Nummern."""
+    import re
+    text = (config.BASE_DIR / "bragvorlage" / "VIDEO-REGELN.md").read_text(encoding="utf-8")
+    verboten = [r"R[üu]e?mpelwerk", r"Luviq|Luisa", r"Fl[üu]e?gel", r"Scherzinger",
+                r"[A-Za-z]:\\", r"Desktop\\", r"\d\s?(€|EUR\b)", r"@[\w-]+\.\w+",
+                r"(?:\+49|\b0\d{3,4})[\s/-]?\d{3}[\s-]?\d{3,}"]
+    for muster in verboten:
+        assert not re.search(muster, text, flags=re.IGNORECASE), f"Privates in VIDEO-REGELN.md: {muster}"
+    assert len(re.findall(r"(?m)^\d+\. \*\*", text)) >= 40
 
 
 # ── Der Ereignisstrom der CLI ────────────────────────────────────────────────

@@ -861,6 +861,10 @@ zum fertigen Ergebnis und stelle keine Rückfragen.
    abgenommenen Produktion: ABCD-Gerüst, sichere Zonen der Apps, Vorher/Nachher,
    Farbgrading als Dramaturgie, Schnitt aufs Taktraster, End-Card, Bildaufbereitung
    kleiner Vorlagen. Bei einem Dienstleistungs-Film ist es die Hauptquelle.
+   Lies danach `rezept/VIDEO-REGELN.md` — die allgemeinen Qualitätsregeln (Marke 1:1,
+   Anfang und Ende, Bildaufbau, Bewegung, Ton, Wahrheit, Ton gegenüber Zuschauern,
+   Prüfung). Sie gelten für jeden Film; widerspricht das Briefing, gilt das Briefing,
+   außer bei Wahrheit/Recht und dem Ton gegenüber Zuschauern.
 4. Drei fertige, geprüfte Kompositionen liegen bei. Übernimm daraus die MACHART
    (Zeitachse, Audio-Verdrahtung, Bewegungsschnitte, Masken, Beat-Kommentare),
    NIEMALS Inhalte, Farben, Schriften oder Texte — die gehören anderen Kunden:
